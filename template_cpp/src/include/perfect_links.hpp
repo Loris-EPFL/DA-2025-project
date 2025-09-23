@@ -2,14 +2,17 @@
 
 #include "parser.hpp"
 #include "pl_message.hpp"
+#include "host_utils.hpp"
 #include <vector>
+#include <string>
 #include <thread>
 #include <mutex>
-#include <map>
-#include <set>
-#include <fstream>
-#include <chrono>
 #include <atomic>
+#include <fstream>
+#include <map>
+#include <chrono>
+#include <functional>
+#include <set>
 #include <sys/socket.h>
 #include <netinet/in.h>
 
@@ -26,13 +29,14 @@
 class PerfectLinks {
 public:
     /**
-     * Constructor
-     * @param process_id The ID of this process
-     * @param hosts List of all processes in the system
-     * @param output_path Path to the output file for logging
+     * Modern constructor using Parser-based approach
      */
-    PerfectLinks(uint8_t process_id, const std::vector<Parser::Host>& hosts, 
+    PerfectLinks(Parser::Host localhost,
+                std::function<void(uint32_t, uint32_t)> deliveryCallback,
+                std::map<unsigned long, Parser::Host> idToPeer,
                 const std::string& output_path);
+    
+
     
     /**
      * Destructor - ensures proper cleanup
@@ -74,10 +78,12 @@ public:
 private:
     // Core member variables
     uint8_t process_id_;
-    std::vector<Parser::Host> hosts_;
+    Parser::Host localhost_;
+    std::map<unsigned long, Parser::Host> id_to_peer_;
+    std::function<void(uint32_t, uint32_t)> delivery_callback_;
     std::string output_path_;
     int socket_fd_;
-    std::atomic<uint32_t> next_sequence_number_;
+    VectorClock local_vector_clock_;  // Local vector clock for this process
     std::atomic<bool> running_;
     
     // Threading
@@ -94,17 +100,12 @@ private:
         PendingMessage() : ack_received(false) {}
     };
     
-    std::map<std::pair<uint8_t, uint32_t>, PendingMessage> pending_messages_;
+    std::map<std::pair<uint8_t, VectorClock>, PendingMessage> pending_messages_;
     std::mutex pending_messages_mutex_;
     
-    // Delivery tracking
-    std::map<uint8_t, uint32_t> expected_sequence_numbers_;
-    std::map<uint8_t, std::set<uint32_t>> delivered_messages_;
+    // Delivery tracking - using vector clocks for ordering
+    std::map<uint8_t, std::set<VectorClock>> delivered_messages_;
     std::mutex delivered_messages_mutex_;
-    
-    // Output handling
-    std::ofstream output_file_;
-    std::mutex output_mutex_;
     
     // Private helper methods
     
@@ -141,22 +142,9 @@ private:
     void handleAckMessage(const PLMessage& msg);
     
     /**
-     * Retransmission loop - runs in separate thread
+     * Main retransmission loop - runs in separate thread
      */
     void retransmissionLoop();
-    
-    /**
-     * Log a broadcast event
-     * @param sequence_number The sequence number of the broadcast message
-     */
-    void logBroadcast(uint32_t sequence_number);
-    
-    /**
-     * Log a delivery event
-     * @param sender_id ID of the message sender
-     * @param sequence_number Sequence number of the delivered message
-     */
-    void logDelivery(uint32_t sender_id, uint32_t sequence_number);
     
     // Prevent copying
     PerfectLinks(const PerfectLinks&) = delete;

@@ -6,6 +6,7 @@
 #include "parser.hpp"
 #include "hello.h"
 #include "perfect_links.hpp"
+#include "host_utils.hpp"
 #include <signal.h>
 
 // Global Perfect Links instance for signal handling
@@ -77,7 +78,12 @@ int main(int argc, char **argv) {
 
   // Initialize Perfect Links
   try {
-    PerfectLinks perfect_links(static_cast<uint8_t>(parser.id()), hosts, parser.outputPath());
+    // Use modern constructor with HostUtils helpers
+    auto localhost = HostUtils::findLocalhost(hosts, parser.id());
+    auto idToPeer = HostUtils::createIdToPeerMap(hosts);
+    auto deliveryCallback = HostUtils::createDeliveryCallback(parser.outputPath());
+    
+    PerfectLinks perfect_links(localhost, deliveryCallback, idToPeer, parser.outputPath());
     g_perfect_links = &perfect_links;
     
     if (!perfect_links.initialize()) {
