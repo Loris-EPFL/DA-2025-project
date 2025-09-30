@@ -108,11 +108,35 @@ int main(int argc, char **argv) {
     
     std::cout << "Sending " << num_messages << " messages to process " << destination_id << std::endl;
     
-    // Send messages
-    for (int i = 1; i <= num_messages; ++i) {
-      perfect_links.send(static_cast<uint8_t>(destination_id), static_cast<uint32_t>(i));
-      // Small delay to avoid overwhelming the network
-      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    // Only sender processes log broadcast events
+    // Receiver processes only log delivery events (handled by delivery callback)
+    if (parser.id() != static_cast<unsigned long>(destination_id)) {
+      // Open output file for logging broadcast events (sender only)
+      std::ofstream output_file(parser.outputPath());
+      if (!output_file.is_open()) {
+        std::cerr << "Failed to open output file: " << parser.outputPath() << std::endl;
+        return 1;
+      }
+      
+      // Send messages and log broadcast events
+      for (int i = 1; i <= num_messages; ++i) {
+        // Log broadcast event
+        output_file << "b " << i << std::endl;
+        output_file.flush();
+        
+        perfect_links.send(static_cast<uint8_t>(destination_id), static_cast<uint32_t>(i));
+        // Small delay to avoid overwhelming the network
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      }
+      
+      output_file.close();
+    } else {
+      // Receiver process: only send messages, delivery logging handled by callback
+      for (int i = 1; i <= num_messages; ++i) {
+        perfect_links.send(static_cast<uint8_t>(destination_id), static_cast<uint32_t>(i));
+        // Small delay to avoid overwhelming the network
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      }
     }
     
     // After a process finishes broadcasting,
