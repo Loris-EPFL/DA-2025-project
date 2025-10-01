@@ -31,6 +31,8 @@ PerfectLinks::PerfectLinks(Parser::Host localhost,
 // Destructor
 PerfectLinks::~PerfectLinks() {
     stop();
+    // Write all logs to file before destruction
+    writeLogsToFile();
 }
 
 // Initialize the Perfect Links system
@@ -241,10 +243,8 @@ void PerfectLinks::handleDataMessage(const PLMessage& msg, const struct sockaddr
             delivered_messages_[sender_id].insert(msg_clock);
         }
         
-        // Use delivery callback - for now, use sender's clock value for logging
-        if (delivery_callback_) {
-            delivery_callback_(sender_id, msg_clock.get(sender_id));
-        }
+        // Log delivery event in memory
+        logDelivery(sender_id, msg_clock.get(sender_id));
     }
 }
 
@@ -291,4 +291,45 @@ void PerfectLinks::retransmissionLoop() {
         
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
+}
+
+void PerfectLinks::logBroadcast(uint32_t sequence_number) {
+    std::lock_guard<std::mutex> lock(log_entries_mutex_);
+    log_entries_.emplace_back('b', process_id_, sequence_number);
+}
+
+void PerfectLinks::logDelivery(uint32_t sender_id, uint32_t sequence_number) {
+    std::lock_guard<std::mutex> lock(log_entries_mutex_);
+    log_entries_.emplace_back('d', sender_id, sequence_number);
+}
+
+void PerfectLinks::writeLogsToFile() {
+    std::lock_guard<std::mutex> lock(log_entries_mutex_);
+    
+    if (log_entries_.empty()) {
+        return;
+    }
+    
+    // Sort log entries by timestamp to ensure chronological order
+    std::sort(log_entries_.begin(), log_entries_.end(), 
+              [](const LogEntry& a, const LogEntry& b) {
+                  return a.timestamp < b.timestamp;
+              });
+    
+    // Write to output file
+    std::ofstream output_file(output_path_);
+    if (!output_file.is_open()) {
+        std::cerr << "Failed to open output file: " << output_path_ << std::endl;
+        return;
+    }
+    
+    for (const auto& entry : log_entries_) {
+        if (entry.type == 'b') {
+            output_file << "b " << entry.sequence_number << std::endl;
+        } else if (entry.type == 'd') {
+            output_file << "d " << entry.sender_id << " " << entry.sequence_number << std::endl;
+        }
+    }
+    
+    output_file.close();
 }

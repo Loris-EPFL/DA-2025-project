@@ -86,6 +86,21 @@ private:
     VectorClock local_vector_clock_;  // Local vector clock for this process
     std::atomic<bool> running_;
     
+    // In-memory logging for better performance
+    struct LogEntry {
+        char type;  // 'b' for broadcast, 'd' for delivery
+        uint32_t sender_id;  // For delivery events
+        uint32_t sequence_number;
+        std::chrono::steady_clock::time_point timestamp;
+        
+        LogEntry(char t, uint32_t sender, uint32_t seq) 
+            : type(t), sender_id(sender), sequence_number(seq), 
+              timestamp(std::chrono::steady_clock::now()) {}
+    };
+    
+    std::vector<LogEntry> log_entries_;
+    std::mutex log_entries_mutex_;
+    
     // Threading
     std::thread receiver_thread_;
     std::thread retransmission_thread_;
@@ -150,3 +165,18 @@ private:
     PerfectLinks(const PerfectLinks&) = delete;
     PerfectLinks& operator=(const PerfectLinks&) = delete;
 };
+
+    /**
+     * Write all logged events to output file in chronological order
+     */
+    void writeLogsToFile();
+    
+    /**
+     * Log a broadcast event in memory
+     */
+    void logBroadcast(uint32_t sequence_number);
+    
+    /**
+     * Log a delivery event in memory
+     */
+    void logDelivery(uint32_t sender_id, uint32_t sequence_number);

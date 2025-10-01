@@ -137,6 +137,12 @@ int main(int argc, char **argv) {
         // Small delay to avoid overwhelming the network
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
       }
+    
+    // Send messages if this process is a sender
+    if (parser.id() == 1 || parser.id() == 3) {
+        for (uint32_t i = 1; i <= 10; ++i) {
+            perfect_links.send(2, i);  // Send to process 2
+        }
     }
     
     // After a process finishes broadcasting,
