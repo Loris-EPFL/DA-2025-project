@@ -73,7 +73,16 @@ public:
      * Broadcast a message to all other processes
      * @param message The message payload to broadcast
      */
+    /**
+     * Broadcast a message to all peers
+     * @param message The message to broadcast
+     */
     void broadcast(uint32_t message);
+
+    /**
+     * Write all logged events to output file in chronological order
+     */
+    void writeLogsToFile();
 
 private:
     // Core member variables
@@ -161,16 +170,6 @@ private:
      */
     void retransmissionLoop();
     
-    // Prevent copying
-    PerfectLinks(const PerfectLinks&) = delete;
-    PerfectLinks& operator=(const PerfectLinks&) = delete;
-};
-
-    /**
-     * Write all logged events to output file in chronological order
-     */
-    void writeLogsToFile();
-    
     /**
      * Log a broadcast event in memory
      */
@@ -180,3 +179,13 @@ private:
      * Log a delivery event in memory
      */
     void logDelivery(uint32_t sender_id, uint32_t sequence_number);
+    
+    // Prevent copying
+    PerfectLinks(const PerfectLinks&) = delete;
+    PerfectLinks& operator=(const PerfectLinks&) = delete;
+};
+
+    /**
+     * Write all logged events to output file in chronological order
+     */
+    void writeLogsToFile();

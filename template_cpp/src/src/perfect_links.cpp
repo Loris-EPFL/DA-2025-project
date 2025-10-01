@@ -133,6 +133,9 @@ void PerfectLinks::send(uint8_t destination_id, uint32_t message) {
     local_vector_clock_.increment(process_id_);  // Increment our own clock
     PLMessage msg(static_cast<uint32_t>(process_id_), destination_id, local_vector_clock_, MessageType::DATA, message, true);
     
+    // Log broadcast event in memory
+    logBroadcast(local_vector_clock_.get(process_id_));
+    
     // Store for retransmission
     {
         std::lock_guard<std::mutex> lock(pending_messages_mutex_);
