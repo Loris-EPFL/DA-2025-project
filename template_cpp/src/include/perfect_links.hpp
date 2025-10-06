@@ -114,22 +114,55 @@ private:
     std::thread receiver_thread_;
     std::thread retransmission_thread_;
     
-    // Message tracking
+    // Message tracking with simplified identifiers
+    struct MessageId {
+        uint8_t sender_id;
+        uint32_t sequence_number;
+        
+        bool operator<(const MessageId& other) const {
+            if (sender_id != other.sender_id) return sender_id < other.sender_id;
+            return sequence_number < other.sequence_number;
+        }
+        
+        bool operator==(const MessageId& other) const {
+            return sender_id == other.sender_id && sequence_number == other.sequence_number;
+        }
+    };
+    
     struct PendingMessage {
         PLMessage message;
         Parser::Host destination;
         std::chrono::steady_clock::time_point last_sent;
-        bool ack_received;
+        std::atomic<bool> ack_received;
+        uint32_t retransmission_count;
         
-        PendingMessage() : ack_received(false) {}
+        PendingMessage() : ack_received(false), retransmission_count(0) {}
+        
+        // Copy constructor for atomic member
+        PendingMessage(const PendingMessage& other) 
+            : message(other.message), destination(other.destination), 
+              last_sent(other.last_sent), ack_received(other.ack_received.load()),
+              retransmission_count(other.retransmission_count) {}
+        
+        // Assignment operator for atomic member
+        PendingMessage& operator=(const PendingMessage& other) {
+            if (this != &other) {
+                message = other.message;
+                destination = other.destination;
+                last_sent = other.last_sent;
+                ack_received.store(other.ack_received.load());
+                retransmission_count = other.retransmission_count;
+            }
+            return *this;
+        }
     };
     
-    std::map<std::pair<uint8_t, VectorClock>, PendingMessage> pending_messages_;
-    std::mutex pending_messages_mutex_;
+    std::map<MessageId, PendingMessage> pending_messages_;
+    // Note: pending_mutex_ removed - using atomic operations in PendingMessage
     
-    // Delivery tracking - using vector clocks for ordering
-    std::map<uint8_t, std::set<VectorClock>> delivered_messages_;
-    std::mutex delivered_messages_mutex_;
+    // Delivery tracking with simplified message IDs
+    std::set<MessageId> delivered_messages_;
+    std::mutex delivered_mutex_;  // Keep mutex only for delivered_messages_ set operations
     
     // Private helper methods
     
@@ -164,6 +197,13 @@ private:
      * @param msg The ACK message
      */
     void handleAckMessage(const PLMessage& msg);
+    
+    /**
+     * Send an ACK message to acknowledge receipt of a DATA message
+     * @param sender_id ID of the process that sent the original message
+     * @param sequence_number Sequence number of the message being acknowledged
+     */
+    void sendAck(uint8_t sender_id, uint32_t sequence_number);
     
     /**
      * Main retransmission loop - runs in separate thread

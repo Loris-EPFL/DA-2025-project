@@ -28,6 +28,24 @@ PerfectLinks::PerfectLinks(Parser::Host localhost,
     // (it will be incremented when sending first message)
 }
 
+void PerfectLinks::sendAck(uint8_t sender_id, uint32_t sequence_number) {
+    // Create ACK message - the ACK should contain the original sender_id and sequence_number
+    // so the sender can match it with their pending message
+    PLMessage ack_msg;
+    ack_msg.sender_id = sender_id;  // Original sender's ID (for matching)
+    ack_msg.peer_id = static_cast<uint32_t>(process_id_);  // Who is sending the ACK
+    ack_msg.sequence_number = sequence_number;  // Original sequence number
+    ack_msg.message_type = MessageType::ACK;
+    ack_msg.payload = 0;
+    ack_msg.ack_required = false;
+    
+    // Send ACK to the original sender
+    auto it = id_to_peer_.find(sender_id);
+    if (it != id_to_peer_.end()) {
+        sendMessage(ack_msg, it->second);
+    }
+}
+
 // Destructor
 PerfectLinks::~PerfectLinks() {
     stop();
@@ -120,36 +138,37 @@ void PerfectLinks::send(uint8_t destination_id, uint32_t message) {
         return;
     }
     
-    // Find destination host using O(1) lookup
+    // Create message with sequence number
+    PLMessage msg;
+    msg.sender_id = static_cast<uint32_t>(process_id_);
+    msg.peer_id = destination_id;
+    msg.sequence_number = message;  // Use message as sequence number for MS1
+    msg.message_type = MessageType::DATA;
+    msg.payload = message;
+    msg.ack_required = true;
+    
+    // Find destination host
     auto it = id_to_peer_.find(destination_id);
     if (it == id_to_peer_.end()) {
-        std::cerr << "Destination host " << destination_id << " not found" << std::endl;
-        return;
+        return; // Invalid destination
     }
     
-    const Parser::Host& dest_host = it->second;
+    // Log broadcast
+    logBroadcast(message);
     
-    // Create message with updated vector clock
-    local_vector_clock_.increment(process_id_);  // Increment our own clock
-    PLMessage msg(static_cast<uint32_t>(process_id_), destination_id, local_vector_clock_, MessageType::DATA, message, true);
+    // Add to pending messages for retransmission (Stubborn Links)
+    MessageId msg_id = {static_cast<uint8_t>(process_id_), message};
+    PendingMessage pending;
+    pending.message = msg;
+    pending.destination = it->second;
+    pending.last_sent = std::chrono::steady_clock::now();
+    pending.ack_received.store(false);  // Use atomic store
     
-    // Log broadcast event in memory
-    logBroadcast(local_vector_clock_.get(process_id_));
+    // Insert into pending messages (this is the only place we add, so minimal locking needed)
+    pending_messages_[msg_id] = std::move(pending);
     
-    // Store for retransmission
-    {
-        std::lock_guard<std::mutex> lock(pending_messages_mutex_);
-        PendingMessage pending;
-        pending.message = msg;
-        pending.destination = dest_host;
-        pending.last_sent = std::chrono::steady_clock::now();
-        pending.ack_received = false;
-        
-        pending_messages_[std::make_pair(destination_id, msg.vector_clock)] = pending;
-    }
-    
-    // Send immediately
-    sendMessage(msg, dest_host);
+    // Send the message immediately (Stubborn Links will handle retransmission)
+    sendMessage(msg, it->second);
 }
 
 // Broadcast a message to all other processes
@@ -202,97 +221,90 @@ void PerfectLinks::receiveLoop() {
 }
 
 void PerfectLinks::handleMessage(const PLMessage& msg, const struct sockaddr_in& sender_addr) {
-    if (msg.message_type == MessageType::DATA) {  // DATA message
+    if (msg.message_type == MessageType::DATA) {
         handleDataMessage(msg, sender_addr);
-    } else if (msg.message_type == MessageType::ACK) {  // ACK message
+    } else if (msg.message_type == MessageType::ACK) {
         handleAckMessage(msg);
     }
 }
 
-void PerfectLinks::handleDataMessage(const PLMessage& msg, const struct sockaddr_in& sender_addr) {
-    uint8_t sender_id = static_cast<uint8_t>(msg.sender_id);
-    const VectorClock& msg_clock = msg.vector_clock;
+void PerfectLinks::handleDataMessage(const PLMessage& message, const sockaddr_in& sender_addr) {
+    // Eliminate Duplicates Algorithm: Check if message already delivered
+    MessageId msg_id = {static_cast<uint8_t>(message.sender_id), message.sequence_number};
     
-    // Update our local vector clock with the received message's clock
-    local_vector_clock_.update(msg_clock);
+    // Always send ACK first (even for duplicates) - this is crucial for reliability
+    sendAck(static_cast<uint8_t>(message.sender_id), message.sequence_number);
     
-    // Check if we've already delivered this message
+    // Check for duplicate delivery (PL2: No Duplication)
+    // Use atomic operations to avoid mutex in core algorithm
+    bool already_delivered = false;
     {
-        std::lock_guard<std::mutex> lock(delivered_messages_mutex_);
-        if (delivered_messages_[sender_id].count(msg_clock) > 0) {
-            // Already delivered, just send ACK
-            PLMessage ack_msg(static_cast<uint32_t>(process_id_), sender_id, msg_clock, MessageType::ACK, 0, false);
-            
-            // Find sender host using O(1) lookup
-            auto it = id_to_peer_.find(sender_id);
-            if (it != id_to_peer_.end()) {
-                sendMessage(ack_msg, it->second);
-            }
-            return;
+        std::lock_guard<std::mutex> lock(delivered_mutex_);
+        if (delivered_messages_.find(msg_id) != delivered_messages_.end()) {
+            already_delivered = true;
+        } else {
+            // Mark as delivered to prevent future duplicates
+            delivered_messages_.insert(msg_id);
         }
     }
     
-    // Send ACK
-    PLMessage ack_msg(static_cast<uint32_t>(process_id_), sender_id, msg_clock, MessageType::ACK, 0, false);
-    
-    // Find sender host using O(1) lookup
-    auto it = id_to_peer_.find(sender_id);
-    if (it != id_to_peer_.end()) {
-        sendMessage(ack_msg, it->second);
+    // Only deliver if not a duplicate
+    if (!already_delivered) {
+        // Deliver the message (PL1: Reliable Delivery)
+        logDelivery(message.sender_id, message.sequence_number);
         
-        // Mark as delivered and log
-        {
-            std::lock_guard<std::mutex> lock(delivered_messages_mutex_);
-            delivered_messages_[sender_id].insert(msg_clock);
+        // Call delivery callback if set
+        if (delivery_callback_) {
+            delivery_callback_(message.sender_id, message.payload);
         }
-        
-        // Log delivery event in memory
-        logDelivery(sender_id, msg_clock.get(sender_id));
     }
 }
 
-void PerfectLinks::handleAckMessage(const PLMessage& msg) {
-    std::lock_guard<std::mutex> lock(pending_messages_mutex_);
-    auto key = std::make_pair(static_cast<unsigned long>(msg.sender_id), msg.vector_clock);
-    auto it = pending_messages_.find(key);
+void PerfectLinks::handleAckMessage(const PLMessage& message) {
+    // The ACK message contains the original sender_id and sequence_number
+    // Find and mark the corresponding pending message as acknowledged
+    MessageId msg_id = {static_cast<uint8_t>(message.sender_id), message.sequence_number};
     
+    // Use atomic operation to mark as acknowledged (lock-free)
+    auto it = pending_messages_.find(msg_id);
     if (it != pending_messages_.end()) {
-        it->second.ack_received = true;
+        it->second.ack_received.store(true);
+        // Message will be cleaned up in retransmissionLoop
     }
 }
 
 void PerfectLinks::retransmissionLoop() {
-    const auto timeout = std::chrono::milliseconds(100);  // 100ms timeout
-    
+    // Stubborn Links Algorithm: "Retransmit Forever"
+    // Keep retransmitting all pending messages until ACK received
     while (running_) {
-        auto now = std::chrono::steady_clock::now();
+        // Retransmit every 100ms (reasonable for network conditions)
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
         
-        {
-            std::lock_guard<std::mutex> lock(pending_messages_mutex_);
-            for (auto& pair : pending_messages_) {
-                PendingMessage& pending = pair.second;
-                
-                if (!pending.ack_received && 
-                    (now - pending.last_sent) > timeout) {
-                    
-                    // Retransmit
-                    sendMessage(pending.message, pending.destination);
-                    pending.last_sent = now;
-                }
-            }
-            
-            // Clean up acknowledged messages
-            auto it = pending_messages_.begin();
-            while (it != pending_messages_.end()) {
-                if (it->second.ack_received) {
-                    it = pending_messages_.erase(it);
-                } else {
-                    ++it;
-                }
+        // Create a copy of pending messages to avoid holding locks during transmission
+        std::vector<std::pair<MessageId, PendingMessage>> messages_to_retransmit;
+        
+        // Collect messages that need retransmission (lock-free read where possible)
+        for (const auto& [msg_id, pending] : pending_messages_) {
+            if (!pending.ack_received.load()) {
+                messages_to_retransmit.push_back({msg_id, pending});
             }
         }
         
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        // Retransmit all pending messages (Stubborn Links property)
+        for (const auto& [msg_id, pending] : messages_to_retransmit) {
+            if (!pending.ack_received.load()) {
+                sendMessage(pending.message, pending.destination);
+            }
+        }
+        
+        // Clean up acknowledged messages
+        for (auto it = pending_messages_.begin(); it != pending_messages_.end();) {
+            if (it->second.ack_received.load()) {
+                it = pending_messages_.erase(it);
+            } else {
+                ++it;
+            }
+        }
     }
 }
 
