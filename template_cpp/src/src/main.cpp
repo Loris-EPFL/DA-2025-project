@@ -21,9 +21,11 @@ static void stop(int) {
   // immediately stop network packet processing
   std::cout << "Immediately stopping network packet processing.\n";
   
-  // Stop Perfect Links if running
+  // Stop Perfect Links if running and write logs
   if (g_perfect_links != nullptr) {
     g_perfect_links->stop();
+    // Explicitly write logs before destruction
+    g_perfect_links->writeLogsToFile();
   }
 
   // write/flush output file if necessary
@@ -107,11 +109,9 @@ int main(int argc, char **argv) {
 
     std::cout << "Sending " << num_messages << " messages to process " << destination_id << std::endl;
 
-    // Send messages if this process is a sender
-    if (parser.id() == 1 || parser.id() == 3) {
-        for (uint32_t i = 1; i <= 10; ++i) {
-            perfect_links.send(2, i);  // Send to process 2
-        }
+    // Send messages according to configuration
+    for (int i = 1; i <= num_messages; ++i) {
+        perfect_links.send(static_cast<uint8_t>(destination_id), i);
     }
 
     // After a process finishes broadcasting,
