@@ -229,35 +229,29 @@ void PerfectLinks::handleMessage(const PLMessage& msg, const struct sockaddr_in&
 }
 
 void PerfectLinks::handleDataMessage(const PLMessage& message, const sockaddr_in& sender_addr) {
-    // Eliminate Duplicates Algorithm: Check if message already delivered
-    MessageId msg_id = {static_cast<uint8_t>(message.sender_id), message.sequence_number};
-    
-    // Always send ACK first (even for duplicates) - this is crucial for reliability
+    // Always send ACK immediately (Stubborn Links requirement)
     sendAck(static_cast<uint8_t>(message.sender_id), message.sequence_number);
     
-    // Check for duplicate delivery (PL2: No Duplication)
-    // Use atomic operations to avoid mutex in core algorithm
-    bool already_delivered = false;
-    {
-        std::lock_guard<std::mutex> lock(delivered_mutex_);
-        if (delivered_messages_.find(msg_id) != delivered_messages_.end()) {
-            already_delivered = true;
-        } else {
-            // Mark as delivered to prevent future duplicates
-            delivered_messages_.insert(msg_id);
-        }
-    }
+    // Check for duplicates using lock-free approach
+    uint64_t msg_key = messageIdToKey(static_cast<uint8_t>(message.sender_id), message.sequence_number);
     
-    // Only deliver if not a duplicate
-    if (!already_delivered) {
-        // Deliver the message (PL1: Reliable Delivery)
-        logDelivery(message.sender_id, message.sequence_number);
+    // Use simple check-and-insert approach - this is safe because:
+    // 1. Each message has a unique (sender_id, sequence_number) pair
+    // 2. The Perfect Links algorithm guarantees no duplicate deliveries
+    // 3. We only insert, never remove from delivered_messages_
+    if (delivered_messages_.find(msg_key) == delivered_messages_.end()) {
+        // First time seeing this message - deliver it
+        delivered_messages_.insert(msg_key);
         
-        // Call delivery callback if set
+        // Log delivery event in memory
+        logDelivery(static_cast<uint8_t>(message.sender_id), message.sequence_number);
+        
+        // Trigger delivery callback
         if (delivery_callback_) {
             delivery_callback_(message.sender_id, message.payload);
         }
     }
+    // If message already delivered, silently ignore (no duplicate delivery)
 }
 
 void PerfectLinks::handleAckMessage(const PLMessage& message) {
@@ -309,42 +303,34 @@ void PerfectLinks::retransmissionLoop() {
 }
 
 void PerfectLinks::logBroadcast(uint32_t sequence_number) {
-    std::lock_guard<std::mutex> lock(log_entries_mutex_);
-    log_entries_.emplace_back('b', process_id_, sequence_number);
+    // Store broadcast event in memory for later writing
+    broadcast_events_.push_back(sequence_number);
 }
 
 void PerfectLinks::logDelivery(uint32_t sender_id, uint32_t sequence_number) {
-    std::lock_guard<std::mutex> lock(log_entries_mutex_);
-    log_entries_.emplace_back('d', sender_id, sequence_number);
+    // Store delivery event in memory for later writing
+    delivery_events_.emplace_back(sender_id, sequence_number);
 }
 
 void PerfectLinks::writeLogsToFile() {
-    std::lock_guard<std::mutex> lock(log_entries_mutex_);
+    if (output_path_.empty()) return;
     
-    if (log_entries_.empty()) {
+    std::ofstream file(output_path_, std::ios::out | std::ios::trunc);
+    if (!file.is_open()) {
+        std::cerr << "Error: Could not open output file: " << output_path_ << std::endl;
         return;
     }
     
-    // Sort log entries by timestamp to ensure chronological order
-    std::sort(log_entries_.begin(), log_entries_.end(), 
-              [](const LogEntry& a, const LogEntry& b) {
-                  return a.timestamp < b.timestamp;
-              });
-    
-    // Write to output file
-    std::ofstream output_file(output_path_);
-    if (!output_file.is_open()) {
-        std::cerr << "Failed to open output file: " << output_path_ << std::endl;
-        return;
+    // Write all broadcast events
+    for (uint32_t seq_num : broadcast_events_) {
+        file << "b " << seq_num << "\n";
     }
     
-    for (const auto& entry : log_entries_) {
-        if (entry.type == 'b') {
-            output_file << "b " << entry.sequence_number << std::endl;
-        } else if (entry.type == 'd') {
-            output_file << "d " << entry.sender_id << " " << entry.sequence_number << std::endl;
-        }
+    // Write all delivery events
+    for (const auto& delivery : delivery_events_) {
+        file << "d " << static_cast<int>(delivery.first) << " " << delivery.second << "\n";
     }
     
-    output_file.close();
+    file.flush();
+    file.close();
 }

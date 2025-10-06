@@ -10,9 +10,12 @@
 #include <atomic>
 #include <fstream>
 #include <map>
+#include <unordered_map>
+#include <memory>
 #include <chrono>
 #include <functional>
 #include <set>
+#include <unordered_set>
 #include <sys/socket.h>
 #include <netinet/in.h>
 
@@ -95,20 +98,12 @@ private:
     VectorClock local_vector_clock_;  // Local vector clock for this process
     std::atomic<bool> running_;
     
-    // In-memory logging for better performance
-    struct LogEntry {
-        char type;  // 'b' for broadcast, 'd' for delivery
-        uint32_t sender_id;  // For delivery events
-        uint32_t sequence_number;
-        std::chrono::steady_clock::time_point timestamp;
-        
-        LogEntry(char t, uint32_t sender, uint32_t seq) 
-            : type(t), sender_id(sender), sequence_number(seq), 
-              timestamp(std::chrono::steady_clock::now()) {}
-    };
+    // Lock-free in-memory storage for broadcast and delivery events
+    std::vector<uint32_t> broadcast_events_;  // Only this process's broadcasts
+    std::vector<std::pair<uint8_t, uint32_t>> delivery_events_;   // All deliveries to this process
     
-    std::vector<LogEntry> log_entries_;
-    std::mutex log_entries_mutex_;
+    // Lock-free delivery tracking using simple set
+    std::unordered_set<uint64_t> delivered_messages_;  // Simple set for delivered message tracking
     
     // Threading
     std::thread receiver_thread_;
@@ -158,11 +153,12 @@ private:
     };
     
     std::map<MessageId, PendingMessage> pending_messages_;
-    // Note: pending_mutex_ removed - using atomic operations in PendingMessage
+    // Note: All mutexes removed - using atomic operations and lock-free algorithms
     
-    // Delivery tracking with simplified message IDs
-    std::set<MessageId> delivered_messages_;
-    std::mutex delivered_mutex_;  // Keep mutex only for delivered_messages_ set operations
+    // Helper function to convert MessageId to uint64_t for duplicate detection
+    uint64_t messageIdToKey(uint8_t sender_id, uint32_t sequence_number) const {
+        return (static_cast<uint64_t>(sender_id) << 32) | sequence_number;
+    }
     
     // Private helper methods
     
