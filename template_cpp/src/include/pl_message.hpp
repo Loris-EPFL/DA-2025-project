@@ -98,54 +98,37 @@ enum class MessageType : uint32_t {
 };
 
 /**
- * Message structure for Perfect Links protocol
- * 
- * This structure defines the format of messages exchanged between processes
- * in the Perfect Links implementation. It includes all necessary metadata
- * for reliable message delivery with vector clock ordering.
+ * Perfect Links Message structure for reliable point-to-point communication
+ * Contains all necessary information for message delivery and acknowledgment
  */
 struct PLMessage {
     uint32_t sender_id;        // ID of the process that sent this message
     uint32_t peer_id;          // ID of the intended recipient process
+    uint32_t sequence_number;  // Protocol-managed sequence number for ordering/deduplication
     VectorClock vector_clock;  // Vector clock for causal ordering
     MessageType message_type;  // Type of message (DATA, ACK, etc.)
-    uint32_t payload;          // The actual message content
+    std::vector<uint8_t> payload;  // The actual message content (opaque data)
     bool ack_required;         // Whether this message requires acknowledgment
     
-    /**
-     * Default constructor - initializes all fields to safe defaults
-     */
-    PLMessage() : sender_id(0), peer_id(0), vector_clock(), 
-                  message_type(MessageType::DATA), payload(0), ack_required(true) {}
+    // Default constructor
+    PLMessage() : sender_id(0), peer_id(0), sequence_number(0), vector_clock(), 
+                  message_type(MessageType::DATA), payload(), ack_required(true) {}
     
-    /**
-     * Parameterized constructor
-     * @param sid Sender ID
-     * @param pid Peer (recipient) ID
-     * @param vclock Vector clock
-     * @param type Message type
-     * @param data Payload data
-     * @param ack_req Whether acknowledgment is required
-     */
-    PLMessage(uint32_t sid, uint32_t pid, const VectorClock& vclock, MessageType type, 
-              uint32_t data, bool ack_req = true) 
-        : sender_id(sid), peer_id(pid), vector_clock(vclock), 
+    // Constructor with vector clock
+    PLMessage(uint32_t sid, uint32_t pid, uint32_t seq_num, const VectorClock& vclock, 
+              MessageType type, const std::vector<uint8_t>& data, bool ack_req = true) 
+        : sender_id(sid), peer_id(pid), sequence_number(seq_num), vector_clock(vclock), 
           message_type(type), payload(data), ack_required(ack_req) {}
     
-    /**
-     * Legacy constructor for backward compatibility with sequence numbers
-     * @param sid Sender ID
-     * @param pid Peer (recipient) ID  
-     * @param seq Sequence number (converted to vector clock)
-     * @param type Message type
-     * @param data Payload data
-     * @param ack_req Whether acknowledgment is required
-     */
-    PLMessage(uint32_t sid, uint32_t pid, uint32_t seq, MessageType type, 
-              uint32_t data, bool ack_req = true) 
-        : sender_id(sid), peer_id(pid), vector_clock(), 
-          message_type(type), payload(data), ack_required(ack_req) {
-        // Convert sequence number to vector clock by setting sender's clock
-        vector_clock.set(sid, seq);
-    }
+    // Constructor without vector clock (for simple cases)
+    PLMessage(uint32_t sid, uint32_t pid, uint32_t seq_num, MessageType type, 
+              const std::vector<uint8_t>& data, bool ack_req = true) 
+        : sender_id(sid), peer_id(pid), sequence_number(seq_num), vector_clock(), 
+          message_type(type), payload(data), ack_required(ack_req) {}
+    
+    // Convenience constructor for ACK messages (empty payload)
+    PLMessage(uint32_t sid, uint32_t pid, uint32_t seq_num, const VectorClock& vclock, 
+              MessageType type, bool ack_req = false) 
+        : sender_id(sid), peer_id(pid), sequence_number(seq_num), vector_clock(vclock), 
+          message_type(type), payload(), ack_required(ack_req) {}
 };

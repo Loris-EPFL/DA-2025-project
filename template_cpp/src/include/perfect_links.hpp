@@ -65,13 +65,26 @@ public:
     /**
      * Send a message to a specific destination using Perfect Links
      * @param destination_id ID of the destination process
-     * @param message The message payload to send
+     * @param payload The message payload to send (opaque data)
+     */
+    void send(uint8_t destination_id, const std::vector<uint8_t>& payload);
+    
+    /**
+     * Broadcast a message to all other processes
+     * @param payload The message payload to broadcast (opaque data)
+     */
+    void broadcast(const std::vector<uint8_t>& payload);
+    
+    /**
+     * Convenience method: Send a message with integer payload
+     * @param destination_id ID of the destination process
+     * @param message The integer message to send
      */
     void send(uint8_t destination_id, uint32_t message);
     
     /**
-     * Broadcast a message to all other processes
-     * @param message The message payload to broadcast
+     * Convenience method: Broadcast a message with integer payload
+     * @param message The integer message to broadcast
      */
     void broadcast(uint32_t message);
 
@@ -85,6 +98,7 @@ private:
     int socket_fd_;
     VectorClock local_vector_clock_;  // Local vector clock for this process
     std::atomic<bool> running_;
+    std::atomic<uint32_t> next_sequence_number_;  // Protocol-managed sequence numbers
     
     // Threading
     std::thread receiver_thread_;
@@ -100,11 +114,11 @@ private:
         PendingMessage() : ack_received(false) {}
     };
     
-    std::map<std::pair<uint8_t, VectorClock>, PendingMessage> pending_messages_;
+    std::map<std::pair<uint8_t, uint32_t>, PendingMessage> pending_messages_;
     std::mutex pending_messages_mutex_;
     
-    // Delivery tracking - using vector clocks for ordering
-    std::map<uint8_t, std::set<VectorClock>> delivered_messages_;
+    // Track delivered messages to prevent duplicates (sender_id -> set of sequence numbers)
+    std::map<uint8_t, std::set<uint32_t>> delivered_messages_;
     std::mutex delivered_messages_mutex_;
     
     // Private helper methods

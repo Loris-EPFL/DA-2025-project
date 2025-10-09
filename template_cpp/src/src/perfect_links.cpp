@@ -22,7 +22,8 @@ PerfectLinks::PerfectLinks(Parser::Host localhost,
       output_path_(output_path),
       socket_fd_(-1), 
       local_vector_clock_(),
-      running_(false) {
+      running_(false),
+      next_sequence_number_(1) {  // Start sequence numbers from 1
     
     // Initialize local vector clock - set this process's clock to 0
     // (it will be incremented when sending first message)
@@ -111,25 +112,25 @@ void PerfectLinks::stop() {
     std::cout << "Perfect Links stopped" << std::endl;
 }
 
-// Send a message using Perfect Links
-void PerfectLinks::send(uint8_t destination_id, uint32_t message) {
-    if (!running_ || socket_fd_ < 0) {
-        std::cerr << "Perfect Links not running" << std::endl;
+// Send a message to a specific destination using Perfect Links
+void PerfectLinks::send(uint8_t destination_id, const std::vector<uint8_t>& payload) {
+    if (!running_) {
         return;
     }
     
-    // Find destination host using O(1) lookup
+    // Find destination host
     auto it = id_to_peer_.find(destination_id);
     if (it == id_to_peer_.end()) {
-        std::cerr << "Destination host " << destination_id << " not found" << std::endl;
-        return;
+        return;  // Invalid destination
     }
-    
     const Parser::Host& dest_host = it->second;
+    
+    // Get next sequence number
+    uint32_t seq_num = next_sequence_number_.fetch_add(1);
     
     // Create message with updated vector clock
     local_vector_clock_.increment(process_id_);  // Increment our own clock
-    PLMessage msg(static_cast<uint32_t>(process_id_), destination_id, local_vector_clock_, MessageType::DATA, message, true);
+    PLMessage msg(static_cast<uint32_t>(process_id_), destination_id, seq_num, local_vector_clock_, MessageType::DATA, payload, true);
     
     // Store for retransmission
     {
@@ -140,20 +141,36 @@ void PerfectLinks::send(uint8_t destination_id, uint32_t message) {
         pending.last_sent = std::chrono::steady_clock::now();
         pending.ack_received = false;
         
-        pending_messages_[std::make_pair(destination_id, msg.vector_clock)] = pending;
+        pending_messages_[std::make_pair(destination_id, seq_num)] = pending;
     }
     
     // Send immediately
     sendMessage(msg, dest_host);
 }
 
+// Convenience method: Send a message with integer payload
+void PerfectLinks::send(uint8_t destination_id, uint32_t message) {
+    // Convert integer to byte vector
+    std::vector<uint8_t> payload(sizeof(uint32_t));
+    std::memcpy(payload.data(), &message, sizeof(uint32_t));
+    send(destination_id, payload);
+}
+
 // Broadcast a message to all other processes
-void PerfectLinks::broadcast(uint32_t message) {
+void PerfectLinks::broadcast(const std::vector<uint8_t>& payload) {
     for (const auto& [id, host] : id_to_peer_) {
         if (id != process_id_) {
-            send(static_cast<uint8_t>(id), message);
+            send(static_cast<uint8_t>(id), payload);
         }
     }
+}
+
+// Convenience method: Broadcast a message with integer payload
+void PerfectLinks::broadcast(uint32_t message) {
+    // Convert integer to byte vector
+    std::vector<uint8_t> payload(sizeof(uint32_t));
+    std::memcpy(payload.data(), &message, sizeof(uint32_t));
+    broadcast(payload);
 }
 
 // Private helper methods
@@ -206,6 +223,7 @@ void PerfectLinks::handleMessage(const PLMessage& msg, const struct sockaddr_in&
 
 void PerfectLinks::handleDataMessage(const PLMessage& msg, const struct sockaddr_in& sender_addr) {
     uint8_t sender_id = static_cast<uint8_t>(msg.sender_id);
+    uint32_t seq_num = msg.sequence_number;
     const VectorClock& msg_clock = msg.vector_clock;
     
     // Update our local vector clock with the received message's clock
@@ -214,9 +232,9 @@ void PerfectLinks::handleDataMessage(const PLMessage& msg, const struct sockaddr
     // Check if we've already delivered this message
     {
         std::lock_guard<std::mutex> lock(delivered_messages_mutex_);
-        if (delivered_messages_[sender_id].count(msg_clock) > 0) {
+        if (delivered_messages_[sender_id].count(seq_num) > 0) {
             // Already delivered, just send ACK
-            PLMessage ack_msg(static_cast<uint32_t>(process_id_), sender_id, msg_clock, MessageType::ACK, 0, false);
+            PLMessage ack_msg(static_cast<uint32_t>(process_id_), sender_id, seq_num, msg_clock, MessageType::ACK, false);
             
             // Find sender host using O(1) lookup
             auto it = id_to_peer_.find(sender_id);
@@ -228,7 +246,7 @@ void PerfectLinks::handleDataMessage(const PLMessage& msg, const struct sockaddr
     }
     
     // Send ACK
-    PLMessage ack_msg(static_cast<uint32_t>(process_id_), sender_id, msg_clock, MessageType::ACK, 0, false);
+    PLMessage ack_msg(static_cast<uint32_t>(process_id_), sender_id, seq_num, msg_clock, MessageType::ACK, false);
     
     // Find sender host using O(1) lookup
     auto it = id_to_peer_.find(sender_id);
@@ -238,21 +256,23 @@ void PerfectLinks::handleDataMessage(const PLMessage& msg, const struct sockaddr
         // Mark as delivered and log
         {
             std::lock_guard<std::mutex> lock(delivered_messages_mutex_);
-            delivered_messages_[sender_id].insert(msg_clock);
+            delivered_messages_[sender_id].insert(seq_num);
         }
         
-        // Use delivery callback - for now, use sender's clock value for logging
+        // Use delivery callback - use sequence number for logging
         if (delivery_callback_) {
-            delivery_callback_(sender_id, msg_clock.get(sender_id));
+            delivery_callback_(sender_id, seq_num);
         }
     }
 }
 
 void PerfectLinks::handleAckMessage(const PLMessage& msg) {
-    std::lock_guard<std::mutex> lock(pending_messages_mutex_);
-    auto key = std::make_pair(static_cast<unsigned long>(msg.sender_id), msg.vector_clock);
-    auto it = pending_messages_.find(key);
+    uint8_t sender_id = static_cast<uint8_t>(msg.sender_id);
+    uint32_t seq_num = msg.sequence_number;
     
+    // Mark the corresponding message as acknowledged
+    std::lock_guard<std::mutex> lock(pending_messages_mutex_);
+    auto it = pending_messages_.find(std::make_pair(sender_id, seq_num));
     if (it != pending_messages_.end()) {
         it->second.ack_received = true;
     }
