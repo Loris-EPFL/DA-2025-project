@@ -2,7 +2,6 @@
 #include <stdexcept>
 #include <fstream>
 #include <iostream>
-#include <mutex>
 #include <memory>
 
 namespace HostUtils {
