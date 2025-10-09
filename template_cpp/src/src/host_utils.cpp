@@ -28,22 +28,9 @@ namespace HostUtils {
     }
     
     std::function<void(uint32_t, uint32_t)> createDeliveryCallback(const std::string& output_path) {
-        // Create a shared output file stream that will be managed by the callback
-        auto output_file = std::make_shared<std::ofstream>(output_path);
-        auto output_mutex = std::make_shared<std::mutex>();
-        
-        if (!output_file->is_open()) {
-            throw std::runtime_error("Failed to open output file: " + output_path);
-        }
-        
-        return [=](uint32_t sender_id, uint32_t sequence_number) noexcept {
-            try {
-                std::lock_guard<std::mutex> lock(*output_mutex);
-                *output_file << "d " << sender_id << " " << sequence_number << std::endl;
-                output_file->flush();
-            } catch (...) {
-                // Silently ignore errors in noexcept lambda
-            }
+        // Return a no-op callback since logging is now handled internally by PerfectLinks
+        return [](uint32_t sender_id, uint32_t sequence_number) noexcept {
+            // No-op: logging is handled internally by PerfectLinks class
         };
     }
     
