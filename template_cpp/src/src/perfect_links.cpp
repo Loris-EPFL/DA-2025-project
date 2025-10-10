@@ -36,33 +36,45 @@ PerfectLinks::~PerfectLinks() {
 
 // Initialize the Perfect Links system
 bool PerfectLinks::initialize() {
-    // Create UDP socket
-    socket_fd_ = socket(AF_INET, SOCK_DGRAM, 0);
-    if (socket_fd_ < 0) {
-        std::cerr << "Failed to create socket: " << std::strerror(errno) << std::endl;
+    if (localhost_.port == 0 || localhost_.ip == 0) {
+        std::cerr << "Invalid localhost configuration" << std::endl;
         return false;
     }
     
-    // Make socket non-blocking
+    // Create UDP socket
+    socket_fd_ = socket(AF_INET, SOCK_DGRAM, 0);
+    if (socket_fd_ < 0) {
+        std::cerr << "Failed to create socket: " << strerror(errno) << std::endl;
+        return false;
+    }
+    
+    // Set socket to non-blocking mode
     int flags = fcntl(socket_fd_, F_GETFL, 0);
-    if (flags < 0 || fcntl(socket_fd_, F_SETFL, flags | O_NONBLOCK) < 0) {
-        std::cerr << "Failed to set socket non-blocking: " << std::strerror(errno) << std::endl;
+    if (flags < 0) {
+        std::cerr << "Failed to get socket flags: " << strerror(errno) << std::endl;
         close(socket_fd_);
         socket_fd_ = -1;
         return false;
     }
     
-    // Bind to localhost port
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = localhost_.ip;
-    addr.sin_port = localhost_.port;
+    if (fcntl(socket_fd_, F_SETFL, flags | O_NONBLOCK) < 0) {
+        std::cerr << "Failed to set socket non-blocking: " << strerror(errno) << std::endl;
+        close(socket_fd_);
+        socket_fd_ = -1;
+        return false;
+    }
     
-    if (bind(socket_fd_, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0) {
+    // Bind socket to localhost
+    struct sockaddr_in local_addr;
+    memset(&local_addr, 0, sizeof(local_addr));
+    local_addr.sin_family = AF_INET;
+    local_addr.sin_addr.s_addr = localhost_.ip;
+    local_addr.sin_port = localhost_.port;
+    
+    if (bind(socket_fd_, reinterpret_cast<struct sockaddr*>(&local_addr), sizeof(local_addr)) < 0) {
         std::cerr << "Failed to bind socket to " << localhost_.ipReadable() 
                   << ":" << localhost_.portReadable() 
-                  << " - " << std::strerror(errno) << std::endl;
+                  << " - " << strerror(errno) << std::endl;
         close(socket_fd_);
         socket_fd_ = -1;
         return false;
@@ -176,39 +188,82 @@ void PerfectLinks::broadcast(uint32_t message) {
 // Private helper methods
 
 void PerfectLinks::sendMessage(const PLMessage& msg, const Parser::Host& destination) {
+    if (socket_fd_ < 0 || !running_) {
+        return;  // Socket not initialized or system stopped
+    }
+    
     struct sockaddr_in dest_addr;
     memset(&dest_addr, 0, sizeof(dest_addr));
     dest_addr.sin_family = AF_INET;
     dest_addr.sin_addr.s_addr = destination.ip;
     dest_addr.sin_port = destination.port;
     
-    ssize_t sent = sendto(socket_fd_, &msg, sizeof(msg), 0, 
-                         reinterpret_cast<struct sockaddr*>(&dest_addr), sizeof(dest_addr));
-    
-    if (sent < 0 && errno != EAGAIN) {
-        std::cerr << "Failed to send message: " << strerror(errno) << std::endl;
+    // Serialize message to buffer
+    std::vector<uint8_t> buffer;
+    try {
+        size_t msg_size = msg.serialize(buffer);
+        
+        if (msg_size == 0 || msg_size > 65536) {  // Sanity check
+            std::cerr << "Invalid message size: " << msg_size << std::endl;
+            return;
+        }
+        
+        ssize_t sent = sendto(socket_fd_, buffer.data(), msg_size, 0, 
+                             reinterpret_cast<struct sockaddr*>(&dest_addr), sizeof(dest_addr));
+        
+        if (sent < 0) {
+            if (errno != EAGAIN) {
+                std::cerr << "Failed to send message: " << strerror(errno) << std::endl;
+            }
+        } else if (static_cast<size_t>(sent) != msg_size) {
+            std::cerr << "Partial send: " << sent << " of " << msg_size << " bytes" << std::endl;
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "Error serializing message: " << e.what() << std::endl;
     }
 }
 
 void PerfectLinks::receiveLoop() {
-    PLMessage msg;
+    const size_t MAX_MESSAGE_SIZE = 65536;  // 64KB max message size
+    std::vector<uint8_t> buffer(MAX_MESSAGE_SIZE);
     struct sockaddr_in sender_addr;
     socklen_t addr_len = sizeof(sender_addr);
     
     while (running_) {
-        ssize_t received = recvfrom(socket_fd_, &msg, sizeof(msg), 0,
+        if (socket_fd_ < 0) {
+            std::cerr << "Socket closed during receive loop" << std::endl;
+            break;
+        }
+        
+        ssize_t received = recvfrom(socket_fd_, buffer.data(), buffer.size(), 0,
                                    reinterpret_cast<struct sockaddr*>(&sender_addr), &addr_len);
         
         if (received < 0) {
-            if (errno != EAGAIN) {
+            if (errno == EAGAIN) {
+                // Non-blocking socket, no data available
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                continue;
+            } else if (errno == EINTR) {
+                // Interrupted by signal, continue
+                continue;
+            } else {
                 std::cerr << "Failed to receive message: " << strerror(errno) << std::endl;
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                continue;
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            continue;
         }
         
-        if (received == sizeof(msg)) {
-            handleMessage(msg, sender_addr);
+        if (received > 0) {
+            try {
+                PLMessage msg;
+                if (msg.deserialize(buffer.data(), static_cast<size_t>(received))) {
+                    handleMessage(msg, sender_addr);
+                } else {
+                    std::cerr << "Failed to deserialize message of size " << received << std::endl;
+                }
+            } catch (const std::exception& e) {
+                std::cerr << "Error handling received message: " << e.what() << std::endl;
+            }
         }
     }
 }
@@ -227,22 +282,29 @@ void PerfectLinks::handleDataMessage(const PLMessage& msg, const struct sockaddr
     const VectorClock& msg_clock = msg.vector_clock;
     
     // Update our local vector clock with the received message's clock
-    local_vector_clock_.update(msg_clock);
+    // This needs to be thread-safe as multiple threads might access it
+    {
+        std::lock_guard<std::mutex> clock_lock(delivered_messages_mutex_);  // Reuse mutex for simplicity
+        local_vector_clock_.update(msg_clock);
+    }
     
     // Check if we've already delivered this message
+    bool already_delivered = false;
     {
         std::lock_guard<std::mutex> lock(delivered_messages_mutex_);
-        if (delivered_messages_[sender_id].count(seq_num) > 0) {
-            // Already delivered, just send ACK
-            PLMessage ack_msg(static_cast<uint32_t>(process_id_), sender_id, seq_num, msg_clock, MessageType::ACK, false);
-            
-            // Find sender host using O(1) lookup
-            auto it = id_to_peer_.find(sender_id);
-            if (it != id_to_peer_.end()) {
-                sendMessage(ack_msg, it->second);
-            }
-            return;
+        already_delivered = (delivered_messages_[sender_id].count(seq_num) > 0);
+    }
+    
+    if (already_delivered) {
+        // Already delivered, just send ACK
+        PLMessage ack_msg(static_cast<uint32_t>(process_id_), sender_id, seq_num, msg_clock, MessageType::ACK, false);
+        
+        // Find sender host using O(1) lookup
+        auto it = id_to_peer_.find(sender_id);
+        if (it != id_to_peer_.end()) {
+            sendMessage(ack_msg, it->second);
         }
+        return;
     }
     
     // Send ACK
@@ -260,8 +322,13 @@ void PerfectLinks::handleDataMessage(const PLMessage& msg, const struct sockaddr
         }
         
         // Use delivery callback - use sequence number for logging
+        // Callback should be thread-safe as it's called from multiple threads
         if (delivery_callback_) {
-            delivery_callback_(sender_id, seq_num);
+            try {
+                delivery_callback_(sender_id, seq_num);
+            } catch (const std::exception& e) {
+                std::cerr << "Error in delivery callback: " << e.what() << std::endl;
+            }
         }
     }
 }
@@ -276,6 +343,7 @@ void PerfectLinks::handleAckMessage(const PLMessage& msg) {
     if (it != pending_messages_.end()) {
         it->second.ack_received = true;
     }
+    // Note: If message not found, it might have been already cleaned up by retransmission thread
 }
 
 void PerfectLinks::retransmissionLoop() {
@@ -284,8 +352,12 @@ void PerfectLinks::retransmissionLoop() {
     while (running_) {
         auto now = std::chrono::steady_clock::now();
         
+        // Process retransmissions and cleanup in a single critical section
+        // to avoid race conditions between retransmission and ACK handling
         {
             std::lock_guard<std::mutex> lock(pending_messages_mutex_);
+            
+            // First pass: retransmit messages that need it
             for (auto& pair : pending_messages_) {
                 PendingMessage& pending = pair.second;
                 
@@ -298,7 +370,7 @@ void PerfectLinks::retransmissionLoop() {
                 }
             }
             
-            // Clean up acknowledged messages
+            // Second pass: clean up acknowledged messages
             auto it = pending_messages_.begin();
             while (it != pending_messages_.end()) {
                 if (it->second.ack_received) {
@@ -309,6 +381,7 @@ void PerfectLinks::retransmissionLoop() {
             }
         }
         
+        // Sleep outside the critical section to reduce lock contention
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
 }
