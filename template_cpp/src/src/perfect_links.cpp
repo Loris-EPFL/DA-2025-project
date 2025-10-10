@@ -64,6 +64,20 @@ bool PerfectLinks::initialize() {
         return false;
     }
     
+    // Increase socket buffer sizes for high-load scenarios
+    int send_buffer_size = 1024 * 1024;  // 1MB send buffer
+    int recv_buffer_size = 1024 * 1024;  // 1MB receive buffer
+    
+    if (setsockopt(socket_fd_, SOL_SOCKET, SO_SNDBUF, &send_buffer_size, sizeof(send_buffer_size)) < 0) {
+        std::cerr << "Warning: Failed to set send buffer size: " << strerror(errno) << std::endl;
+        // Continue anyway - this is not critical
+    }
+    
+    if (setsockopt(socket_fd_, SOL_SOCKET, SO_RCVBUF, &recv_buffer_size, sizeof(recv_buffer_size)) < 0) {
+        std::cerr << "Warning: Failed to set receive buffer size: " << strerror(errno) << std::endl;
+        // Continue anyway - this is not critical
+    }
+    
     // Bind socket to localhost
     struct sockaddr_in local_addr;
     memset(&local_addr, 0, sizeof(local_addr));
@@ -241,7 +255,7 @@ void PerfectLinks::receiveLoop() {
         if (received < 0) {
             if (errno == EAGAIN) {
                 // Non-blocking socket, no data available
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                std::this_thread::sleep_for(std::chrono::microseconds(500));  // Increased from 100 microseconds for better stability
                 continue;
             } else if (errno == EINTR) {
                 // Interrupted by signal, continue
@@ -347,7 +361,7 @@ void PerfectLinks::handleAckMessage(const PLMessage& msg) {
 }
 
 void PerfectLinks::retransmissionLoop() {
-    const auto timeout = std::chrono::milliseconds(100);  // 100ms timeout
+    const auto timeout = std::chrono::milliseconds(1000);  // 1000ms timeout for better reliability under stress
     
     while (running_) {
         auto now = std::chrono::steady_clock::now();
@@ -382,6 +396,6 @@ void PerfectLinks::retransmissionLoop() {
         }
         
         // Sleep outside the critical section to reduce lock contention
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));  // Increased back to 10ms for stability
     }
 }
