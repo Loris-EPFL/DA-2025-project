@@ -110,8 +110,9 @@ private:
         Parser::Host destination;
         std::chrono::steady_clock::time_point last_sent;
         bool ack_received;
+        uint32_t retransmit_count;  // Track retransmission attempts for adaptive timeout
         
-        PendingMessage() : ack_received(false) {}
+        PendingMessage() : ack_received(false), retransmit_count(0) {}
     };
     
     std::map<std::pair<uint8_t, uint32_t>, PendingMessage> pending_messages_;

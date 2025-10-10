@@ -120,8 +120,22 @@ void PerfectLinks::start() {
 
 // Stop the Perfect Links system
 void PerfectLinks::stop() {
-    running_ = false;
+    if (!running_.load()) {
+        return;  // Already stopped
+    }
     
+    std::cout << "Stopping Perfect Links..." << std::endl;
+    
+    // Set running flag to false to stop all loops
+    running_.store(false);
+    
+    // Close socket to interrupt any blocking operations
+    if (socket_fd_ >= 0) {
+        close(socket_fd_);
+        socket_fd_ = -1;
+    }
+    
+    // Wait for threads to finish with timeout
     if (receiver_thread_.joinable()) {
         receiver_thread_.join();
     }
@@ -130,12 +144,7 @@ void PerfectLinks::stop() {
         retransmission_thread_.join();
     }
     
-    if (socket_fd_ >= 0) {
-        close(socket_fd_);
-        socket_fd_ = -1;
-    }
-    
-    std::cout << "Perfect Links stopped" << std::endl;
+    std::cout << "Perfect Links stopped." << std::endl;
 }
 
 // Send a message to a specific destination using Perfect Links
@@ -321,7 +330,7 @@ void PerfectLinks::handleDataMessage(const PLMessage& msg, const struct sockaddr
         return;
     }
     
-    // Send ACK
+    // Send ACK first to ensure reliability
     PLMessage ack_msg(static_cast<uint32_t>(process_id_), sender_id, seq_num, msg_clock, MessageType::ACK, false);
     
     // Find sender host using O(1) lookup
@@ -329,7 +338,7 @@ void PerfectLinks::handleDataMessage(const PLMessage& msg, const struct sockaddr
     if (it != id_to_peer_.end()) {
         sendMessage(ack_msg, it->second);
         
-        // Mark as delivered and log
+        // Mark as delivered BEFORE calling callback to prevent race conditions
         {
             std::lock_guard<std::mutex> lock(delivered_messages_mutex_);
             delivered_messages_[sender_id].insert(seq_num);
@@ -361,7 +370,9 @@ void PerfectLinks::handleAckMessage(const PLMessage& msg) {
 }
 
 void PerfectLinks::retransmissionLoop() {
-    const auto timeout = std::chrono::milliseconds(1000);  // 1000ms timeout for better reliability under stress
+    // Adaptive timeout: start with 500ms, increase under adverse conditions
+    auto base_timeout = std::chrono::milliseconds(500);
+    auto current_timeout = base_timeout;
     
     while (running_) {
         auto now = std::chrono::steady_clock::now();
@@ -372,19 +383,31 @@ void PerfectLinks::retransmissionLoop() {
             std::lock_guard<std::mutex> lock(pending_messages_mutex_);
             
             // First pass: retransmit messages that need it
+            // INFINITE RETRANSMISSION: Keep retransmitting until ACK received
             for (auto& pair : pending_messages_) {
                 PendingMessage& pending = pair.second;
                 
                 if (!pending.ack_received && 
-                    (now - pending.last_sent) > timeout) {
+                    (now - pending.last_sent) > current_timeout) {
                     
-                    // Retransmit
+                    // Retransmit indefinitely until ACK received
                     sendMessage(pending.message, pending.destination);
                     pending.last_sent = now;
+                    
+                    // Adaptive timeout: increase timeout for persistent failures
+                    // This helps under severe network conditions or process interference
+                    if (pending.retransmit_count > 5) {
+                        current_timeout = std::min(
+                            std::chrono::milliseconds(2000), 
+                            base_timeout * (1 + pending.retransmit_count / 10)
+                        );
+                    }
+                    pending.retransmit_count++;
                 }
             }
             
-            // Second pass: clean up acknowledged messages
+            // Second pass: ONLY clean up acknowledged messages
+            // NEVER remove unacknowledged messages - keep retransmitting forever
             auto it = pending_messages_.begin();
             while (it != pending_messages_.end()) {
                 if (it->second.ack_received) {
@@ -396,6 +419,7 @@ void PerfectLinks::retransmissionLoop() {
         }
         
         // Sleep outside the critical section to reduce lock contention
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));  // Increased back to 10ms for stability
+        // Shorter sleep for more aggressive retransmission under stress
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
 }

@@ -34,8 +34,8 @@ static void stop(int) {
   // write/flush output file if necessary
   std::cout << "Writing output.\n";
 
-  // exit directly from signal handler
-  exit(0);
+  // DO NOT exit directly from signal handler
+  // Let main thread handle cleanup and exit gracefully
 }
 
 int main(int argc, char **argv) {
