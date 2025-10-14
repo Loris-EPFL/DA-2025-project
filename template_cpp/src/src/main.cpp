@@ -2,6 +2,7 @@
 #include <iostream>
 #include <thread>
 #include <fstream>
+#include <atomic>
 
 #include "parser.hpp"
 #include "hello.h"
@@ -10,29 +11,31 @@
 #include <signal.h>
 
 // Global Perfect Links instance for signal handling
-static PerfectLinks* g_perfect_links = nullptr;
-
+static std::atomic<PerfectLinks*> g_perfect_links{nullptr};
+static std::atomic<bool> g_shutdown_requested{false};
 
 static void stop(int) {
   // reset signal handlers to default
   signal(SIGTERM, SIG_DFL);
   signal(SIGINT, SIG_DFL);
 
+  // Set shutdown flag
+  g_shutdown_requested.store(true);
+
   // immediately stop network packet processing
   std::cout << "Immediately stopping network packet processing.\n";
   
-  // Stop Perfect Links if running and write logs
-  if (g_perfect_links != nullptr) {
-    g_perfect_links->stop();
-    // Explicitly write logs before destruction
-    g_perfect_links->writeLogsToFile();
+  // Stop Perfect Links if running
+  PerfectLinks* pl = g_perfect_links.load();
+  if (pl != nullptr) {
+    pl->stop();
   }
 
   // write/flush output file if necessary
   std::cout << "Writing output.\n";
 
-  // exit directly from signal handler
-  exit(0);
+  // DO NOT exit directly from signal handler
+  // Let main thread handle cleanup and exit gracefully
 }
 
 int main(int argc, char **argv) {
@@ -85,10 +88,11 @@ int main(int argc, char **argv) {
     auto deliveryCallback = HostUtils::createDeliveryCallback(parser.outputPath());
 
     PerfectLinks perfect_links(localhost, deliveryCallback, idToPeer, parser.outputPath());
-    g_perfect_links = &perfect_links;
-
+    g_perfect_links.store(&perfect_links);
+    
     if (!perfect_links.initialize()) {
       std::cerr << "Failed to initialize Perfect Links" << std::endl;
+      g_perfect_links.store(nullptr);
       return 1;
     }
 
@@ -116,12 +120,16 @@ int main(int argc, char **argv) {
 
     // After a process finishes broadcasting,
     // it waits forever for the delivery of messages.
-    while (true) {
-      std::this_thread::sleep_for(std::chrono::hours(1));
+    while (!g_shutdown_requested.load()) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
-
+    
+    // Clean shutdown
+    g_perfect_links.store(nullptr);
+    
   } catch (const std::exception& e) {
     std::cerr << "Exception: " << e.what() << std::endl;
+    g_perfect_links.store(nullptr);
     return 1;
   }
 

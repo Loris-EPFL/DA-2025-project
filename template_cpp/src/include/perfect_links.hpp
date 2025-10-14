@@ -68,13 +68,26 @@ public:
     /**
      * Send a message to a specific destination using Perfect Links
      * @param destination_id ID of the destination process
-     * @param message The message payload to send
+     * @param payload The message payload to send (opaque data)
+     */
+    void send(uint8_t destination_id, const std::vector<uint8_t>& payload);
+    
+    /**
+     * Broadcast a message to all other processes
+     * @param payload The message payload to broadcast (opaque data)
+     */
+    void broadcast(const std::vector<uint8_t>& payload);
+    
+    /**
+     * Convenience method: Send a message with integer payload
+     * @param destination_id ID of the destination process
+     * @param message The integer message to send
      */
     void send(uint8_t destination_id, uint32_t message);
     
     /**
-     * Broadcast a message to all other processes
-     * @param message The message payload to broadcast
+     * Convenience method: Broadcast a message with integer payload
+     * @param message The integer message to broadcast
      */
     /**
      * Broadcast a message to all peers
@@ -97,6 +110,7 @@ private:
     int socket_fd_;
     VectorClock local_vector_clock_;  // Local vector clock for this process
     std::atomic<bool> running_;
+    std::atomic<uint32_t> next_sequence_number_;  // Protocol-managed sequence numbers
     
     // Lock-free in-memory storage for broadcast and delivery events
     std::vector<uint32_t> broadcast_events_;  // Only this process's broadcasts
@@ -128,37 +142,18 @@ private:
         PLMessage message;
         Parser::Host destination;
         std::chrono::steady_clock::time_point last_sent;
-        std::atomic<bool> ack_received;
-        uint32_t retransmission_count;
+        bool ack_received;
+        uint32_t retransmit_count;  // Track retransmission attempts for adaptive timeout
         
-        PendingMessage() : ack_received(false), retransmission_count(0) {}
-        
-        // Copy constructor for atomic member
-        PendingMessage(const PendingMessage& other) 
-            : message(other.message), destination(other.destination), 
-              last_sent(other.last_sent), ack_received(other.ack_received.load()),
-              retransmission_count(other.retransmission_count) {}
-        
-        // Assignment operator for atomic member
-        PendingMessage& operator=(const PendingMessage& other) {
-            if (this != &other) {
-                message = other.message;
-                destination = other.destination;
-                last_sent = other.last_sent;
-                ack_received.store(other.ack_received.load());
-                retransmission_count = other.retransmission_count;
-            }
-            return *this;
-        }
+        PendingMessage() : ack_received(false), retransmit_count(0) {}
     };
     
-    std::map<MessageId, PendingMessage> pending_messages_;
-    // Note: All mutexes removed - using atomic operations and lock-free algorithms
+    std::map<std::pair<uint8_t, uint32_t>, PendingMessage> pending_messages_;
+    std::mutex pending_messages_mutex_;
     
-    // Helper function to convert MessageId to uint64_t for duplicate detection
-    uint64_t messageIdToKey(uint8_t sender_id, uint32_t sequence_number) const {
-        return (static_cast<uint64_t>(sender_id) << 32) | sequence_number;
-    }
+    // Track delivered messages to prevent duplicates (sender_id -> set of sequence numbers)
+    std::map<uint8_t, std::set<uint32_t>> delivered_messages_;
+    std::mutex delivered_messages_mutex_;
     
     // Private helper methods
     
