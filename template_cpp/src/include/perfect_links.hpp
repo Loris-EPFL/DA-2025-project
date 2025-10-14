@@ -100,6 +100,11 @@ private:
     std::atomic<bool> running_;
     std::atomic<uint32_t> next_sequence_number_;  // Protocol-managed sequence numbers
     
+    // Performance tuning constants - easily configurable for optimization
+    static constexpr std::chrono::milliseconds RETRANSMISSION_TIMEOUT{100};  // Reduced from 500ms for higher throughput
+    static constexpr std::chrono::milliseconds RETRANSMISSION_SLEEP{2};      // Reduced from 5ms for more aggressive retransmission
+    static constexpr std::chrono::milliseconds MAX_ADAPTIVE_TIMEOUT{1000};   // Reduced from 2000ms for faster recovery
+    
     // Threading
     std::thread receiver_thread_;
     std::thread retransmission_thread_;

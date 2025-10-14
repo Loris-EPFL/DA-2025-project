@@ -370,8 +370,8 @@ void PerfectLinks::handleAckMessage(const PLMessage& msg) {
 }
 
 void PerfectLinks::retransmissionLoop() {
-    // Adaptive timeout: start with 500ms, increase under adverse conditions
-    auto base_timeout = std::chrono::milliseconds(500);
+    // Adaptive timeout: start with configurable base timeout, increase under adverse conditions
+    auto base_timeout = RETRANSMISSION_TIMEOUT;
     auto current_timeout = base_timeout;
     
     while (running_) {
@@ -398,7 +398,7 @@ void PerfectLinks::retransmissionLoop() {
                     // This helps under severe network conditions or process interference
                     if (pending.retransmit_count > 5) {
                         current_timeout = std::min(
-                            std::chrono::milliseconds(2000), 
+                            MAX_ADAPTIVE_TIMEOUT, 
                             base_timeout * (1 + pending.retransmit_count / 10)
                         );
                     }
@@ -420,6 +420,6 @@ void PerfectLinks::retransmissionLoop() {
         
         // Sleep outside the critical section to reduce lock contention
         // Shorter sleep for more aggressive retransmission under stress
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        std::this_thread::sleep_for(RETRANSMISSION_SLEEP);
     }
 }
