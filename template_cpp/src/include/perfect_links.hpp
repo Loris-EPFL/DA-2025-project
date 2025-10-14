@@ -10,9 +10,12 @@
 #include <atomic>
 #include <fstream>
 #include <map>
+#include <unordered_map>
+#include <memory>
 #include <chrono>
 #include <functional>
 #include <set>
+#include <unordered_set>
 #include <sys/socket.h>
 #include <netinet/in.h>
 
@@ -86,7 +89,16 @@ public:
      * Convenience method: Broadcast a message with integer payload
      * @param message The integer message to broadcast
      */
+    /**
+     * Broadcast a message to all peers
+     * @param message The message to broadcast
+     */
     void broadcast(uint32_t message);
+
+    /**
+     * Write all logged events to output file in chronological order
+     */
+    void writeLogsToFile();
 
 private:
     // Core member variables
@@ -100,11 +112,32 @@ private:
     std::atomic<bool> running_;
     std::atomic<uint32_t> next_sequence_number_;  // Protocol-managed sequence numbers
     
+    // Lock-free in-memory storage for broadcast and delivery events
+    std::vector<uint32_t> broadcast_events_;  // Only this process's broadcasts
+    std::vector<std::pair<uint8_t, uint32_t>> delivery_events_;   // All deliveries to this process
+    
+    // Lock-free delivery tracking using simple set
+    std::unordered_set<uint64_t> delivered_messages_;  // Simple set for delivered message tracking
+    
     // Threading
     std::thread receiver_thread_;
     std::thread retransmission_thread_;
     
-    // Message tracking
+    // Message tracking with simplified identifiers
+    struct MessageId {
+        uint8_t sender_id;
+        uint32_t sequence_number;
+        
+        bool operator<(const MessageId& other) const {
+            if (sender_id != other.sender_id) return sender_id < other.sender_id;
+            return sequence_number < other.sequence_number;
+        }
+        
+        bool operator==(const MessageId& other) const {
+            return sender_id == other.sender_id && sequence_number == other.sequence_number;
+        }
+    };
+    
     struct PendingMessage {
         PLMessage message;
         Parser::Host destination;
@@ -157,11 +190,33 @@ private:
     void handleAckMessage(const PLMessage& msg);
     
     /**
+     * Send an ACK message to acknowledge receipt of a DATA message
+     * @param sender_id ID of the process that sent the original message
+     * @param sequence_number Sequence number of the message being acknowledged
+     */
+    void sendAck(uint8_t sender_id, uint32_t sequence_number);
+    
+    /**
      * Main retransmission loop - runs in separate thread
      */
     void retransmissionLoop();
+    
+    /**
+     * Log a broadcast event in memory
+     */
+    void logBroadcast(uint32_t sequence_number);
+    
+    /**
+     * Log a delivery event in memory
+     */
+    void logDelivery(uint32_t sender_id, uint32_t sequence_number);
     
     // Prevent copying
     PerfectLinks(const PerfectLinks&) = delete;
     PerfectLinks& operator=(const PerfectLinks&) = delete;
 };
+
+    /**
+     * Write all logged events to output file in chronological order
+     */
+    void writeLogsToFile();
