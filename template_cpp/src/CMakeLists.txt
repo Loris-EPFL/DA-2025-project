@@ -2,7 +2,7 @@
 # You can, however, change the list of files that comprise this variable.
 
 include_directories(include)
-set(SOURCES src/main.cpp src/hello.c src/perfect_links.cpp src/host_utils.cpp)
+set(SOURCES src/main.cpp src/hello.c src/perfect_links.cpp src/host_utils.cpp src/logger.cpp)
 
 # DO NOT EDIT THE FOLLOWING LINES
 find_package(Threads)
