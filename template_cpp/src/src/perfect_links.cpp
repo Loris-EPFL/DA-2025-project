@@ -23,7 +23,8 @@ PerfectLinks::PerfectLinks(Parser::Host localhost,
       socket_fd_(-1), 
       local_vector_clock_(),
       running_(false),
-      next_sequence_number_(1) {  // Start sequence numbers from 1
+      next_sequence_number_(1),  // Start sequence numbers from 1
+      last_batch_time_(std::chrono::steady_clock::now()) {  // Initialize batch timer
     
     // Initialize local vector clock - set this process's clock to 0
     // (it will be incremented when sending first message)
@@ -126,6 +127,9 @@ void PerfectLinks::stop() {
     
     std::cout << "Stopping Perfect Links..." << std::endl;
     
+    // Flush all pending batches before stopping
+    flushAllBatches();
+    
     // Set running flag to false to stop all loops
     running_.store(false);
     
@@ -179,8 +183,8 @@ void PerfectLinks::send(uint8_t destination_id, const std::vector<uint8_t>& payl
         pending_messages_[std::make_pair(destination_id, seq_num)] = pending;
     }
     
-    // Send immediately
-    sendMessage(msg, dest_host);
+    // Send using batching for better throughput (8 messages per packet)
+    sendBatchedMessage(msg, destination_id);
 }
 
 // Convenience method: Send a message with integer payload
@@ -278,12 +282,11 @@ void PerfectLinks::receiveLoop() {
         
         if (received > 0) {
             try {
-                PLMessage msg;
-                if (msg.deserialize(buffer.data(), static_cast<size_t>(received))) {
-                    handleMessage(msg, sender_addr);
-                } else {
-                    std::cerr << "Failed to deserialize message of size " << received << std::endl;
-                }
+                // Resize buffer to actual received size for processing
+                std::vector<uint8_t> received_buffer(buffer.begin(), buffer.begin() + received);
+                
+                // Try to handle as batched message first (backward compatible)
+                handleBatchedMessage(received_buffer, sender_addr);
             } catch (const std::exception& e) {
                 std::cerr << "Error handling received message: " << e.what() << std::endl;
             }
@@ -422,4 +425,110 @@ void PerfectLinks::retransmissionLoop() {
         // Shorter sleep for more aggressive retransmission under stress
         std::this_thread::sleep_for(RETRANSMISSION_SLEEP);
     }
+}
+
+void PerfectLinks::sendBatchedMessage(const PLMessage& msg, uint8_t destination_id) {
+    std::lock_guard<std::mutex> lock(pending_batches_mutex_);
+    
+    // Add message to pending batch for this destination
+    pending_batches_[destination_id].push_back(msg);
+    
+    // Check if we should flush the batch (size limit or timeout)
+    auto now = std::chrono::steady_clock::now();
+    bool should_flush = false;
+    
+    if (pending_batches_[destination_id].size() >= MAX_BATCH_SIZE) {
+        should_flush = true;
+    } else if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last_batch_time_) >= BATCH_TIMEOUT) {
+        should_flush = true;
+    }
+    
+    if (should_flush) {
+        flushBatch(destination_id);
+        last_batch_time_ = now;
+    }
+}
+
+void PerfectLinks::flushBatch(uint8_t destination_id) {
+    // This method should be called with pending_batches_mutex_ already locked
+    auto it = pending_batches_.find(destination_id);
+    if (it == pending_batches_.end() || it->second.empty()) {
+        return;
+    }
+    
+    // Get the destination host from the ID
+    auto peer_it = id_to_peer_.find(destination_id);
+    if (peer_it == id_to_peer_.end()) {
+        return; // Invalid destination ID
+    }
+    const Parser::Host& destination = peer_it->second;
+    
+    // Create batch message
+    BatchMessage batch;
+    for (const auto& msg : it->second) {
+        if (!batch.addMessage(msg)) {
+            // If we can't add more messages, send current batch and start new one
+            sendBatchToDestination(batch, destination);
+            batch = BatchMessage();
+            batch.addMessage(msg);
+        }
+    }
+    
+    // Send the final batch
+    if (batch.getMessageCount() > 0) {
+        sendBatchToDestination(batch, destination);
+    }
+    
+    // Clear the pending batch
+    it->second.clear();
+}
+
+void PerfectLinks::flushAllBatches() {
+    std::lock_guard<std::mutex> lock(pending_batches_mutex_);
+    
+    for (auto& [destination_id, messages] : pending_batches_) {
+        if (!messages.empty()) {
+            flushBatch(destination_id);
+        }
+    }
+}
+
+void PerfectLinks::sendBatchToDestination(const BatchMessage& batch, const Parser::Host& destination) {
+    std::vector<uint8_t> buffer;
+    if (!batch.serialize(buffer)) {
+        std::cerr << "Failed to serialize batch message" << std::endl;
+        return;
+    }
+    
+    struct sockaddr_in dest_addr;
+    memset(&dest_addr, 0, sizeof(dest_addr));
+    dest_addr.sin_family = AF_INET;
+    dest_addr.sin_addr.s_addr = destination.ip;
+    dest_addr.sin_port = destination.port;
+    
+    ssize_t sent = sendto(socket_fd_, buffer.data(), buffer.size(), 0,
+                         reinterpret_cast<struct sockaddr*>(&dest_addr), sizeof(dest_addr));
+    
+    if (sent < 0) {
+        std::cerr << "Failed to send batch: " << strerror(errno) << std::endl;
+    }
+}
+
+bool PerfectLinks::handleBatchedMessage(const std::vector<uint8_t>& buffer, const struct sockaddr_in& sender_addr) {
+    BatchMessage batch;
+    if (!batch.deserialize(buffer.data(), buffer.size())) {
+        // Not a batch message, try to handle as individual message
+        PLMessage msg;
+        if (msg.deserialize(buffer.data(), buffer.size())) {
+            handleMessage(msg, sender_addr);
+        }
+        return false;
+    }
+    
+    // Process each message in the batch
+    const std::vector<PLMessage>& messages = batch.getMessages();
+    for (const PLMessage& msg : messages) {
+        handleMessage(msg, sender_addr);
+    }
+    return true;
 }

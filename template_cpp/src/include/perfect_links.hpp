@@ -2,6 +2,7 @@
 
 #include "parser.hpp"
 #include "pl_message.hpp"
+#include "batch_message.hpp"
 #include "host_utils.hpp"
 #include <vector>
 #include <string>
@@ -127,14 +128,54 @@ private:
     std::map<uint8_t, std::set<uint32_t>> delivered_messages_;
     std::mutex delivered_messages_mutex_;
     
+    // Message batching support for 8 messages per packet
+    std::map<uint8_t, std::vector<PLMessage>> pending_batches_;  // Use destination_id as key instead of Host
+    std::mutex pending_batches_mutex_;
+    std::chrono::steady_clock::time_point last_batch_time_;
+    static constexpr std::chrono::milliseconds BATCH_TIMEOUT{5}; // Send batch after 5ms
+    static constexpr size_t MAX_BATCH_SIZE = 8; // Maximum messages per batch
+    
     // Private helper methods
     
     /**
-     * Send a message over UDP
+     * Send a message over UDP (original method for individual messages)
      * @param msg The message to send
      * @param destination The destination host
      */
     void sendMessage(const PLMessage& msg, const Parser::Host& destination);
+    
+    /**
+     * Send a message using batching (up to 8 messages per packet)
+     * @param msg The message to send
+     * @param destination_id The destination process ID
+     */
+    void sendBatchedMessage(const PLMessage& msg, uint8_t destination_id);
+    
+    /**
+     * Flush pending batch for a specific destination
+     * @param destination_id The destination ID to flush batch for
+     */
+    void flushBatch(uint8_t destination_id);
+    
+    /**
+     * Flush all pending batches
+     */
+    void flushAllBatches();
+    
+    /**
+     * Send a batch to a specific destination
+     * @param batch The batch to send
+     * @param destination The destination host
+     */
+    void sendBatchToDestination(const BatchMessage& batch, const Parser::Host& destination);
+    
+    /**
+     * Handle batched messages from received buffer
+     * @param buffer The received buffer containing potential batch data
+     * @param sender_addr The sender's socket address
+     * @return true if successfully processed as batch, false otherwise
+     */
+    bool handleBatchedMessage(const std::vector<uint8_t>& buffer, const struct sockaddr_in& sender_addr);
     
     /**
      * Main receive loop - runs in separate thread
