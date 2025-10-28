@@ -377,6 +377,10 @@ void PerfectLinks::retransmissionLoop() {
     auto base_timeout = RETRANSMISSION_TIMEOUT;
     auto current_timeout = base_timeout;
     
+    // Cleanup tracking: perform cleanup periodically to avoid excessive overhead
+    auto last_cleanup_time = std::chrono::steady_clock::now();
+    constexpr auto CLEANUP_INTERVAL = std::chrono::seconds(30); // Check for cleanup every 30 seconds
+    
     while (running_) {
         auto now = std::chrono::steady_clock::now();
         
@@ -419,6 +423,13 @@ void PerfectLinks::retransmissionLoop() {
                     ++it;
                 }
             }
+        }
+        
+        // Periodic cleanup of delivered_messages_ (outside critical section)
+        // Only perform cleanup if enough time has passed and cleanup is needed
+        if ((now - last_cleanup_time) > CLEANUP_INTERVAL && shouldCleanupDeliveredMessages()) {
+            cleanupDeliveredMessages(); // Clean up all senders
+            last_cleanup_time = now;
         }
         
         // Sleep outside the critical section to reduce lock contention
@@ -531,4 +542,61 @@ bool PerfectLinks::handleBatchedMessage(const std::vector<uint8_t>& buffer, cons
         handleMessage(msg, sender_addr);
     }
     return true;
+}
+
+void PerfectLinks::cleanupDeliveredMessages(uint8_t sender_id) {
+    std::lock_guard<std::mutex> lock(delivered_messages_mutex_);
+    
+    if (sender_id == 0) {
+        // Clean up all senders
+        for (auto& [sid, seq_set] : delivered_messages_) {
+            if (seq_set.size() > DELIVERED_MESSAGES_CLEANUP_THRESHOLD) {
+                cleanupSenderDeliveredMessages(sid, seq_set);
+            }
+        }
+    } else {
+        // Clean up specific sender
+        auto it = delivered_messages_.find(sender_id);
+        if (it != delivered_messages_.end() && it->second.size() > DELIVERED_MESSAGES_CLEANUP_THRESHOLD) {
+            cleanupSenderDeliveredMessages(sender_id, it->second);
+        }
+    }
+}
+
+void PerfectLinks::cleanupSenderDeliveredMessages(uint8_t sender_id, std::set<uint32_t>& seq_set) {
+    // This method assumes delivered_messages_mutex_ is already locked
+    
+    if (seq_set.size() <= DELIVERED_MESSAGES_KEEP_RECENT) {
+        return; // Nothing to clean up
+    }
+    
+    // Convert set to vector for easier manipulation
+    std::vector<uint32_t> seq_numbers(seq_set.begin(), seq_set.end());
+    
+    // Sort to ensure we keep the most recent sequence numbers
+    std::sort(seq_numbers.begin(), seq_numbers.end());
+    
+    // Calculate how many to remove
+    size_t to_remove = seq_numbers.size() - DELIVERED_MESSAGES_KEEP_RECENT;
+    
+    // Remove the oldest sequence numbers (smallest values)
+    for (size_t i = 0; i < to_remove; ++i) {
+        seq_set.erase(seq_numbers[i]);
+    }
+    
+    std::cout << "Cleaned up " << to_remove << " old delivered message records for sender " 
+              << static_cast<int>(sender_id) << ", kept " << seq_set.size() << " recent ones" << std::endl;
+}
+
+bool PerfectLinks::shouldCleanupDeliveredMessages() {
+    std::lock_guard<std::mutex> lock(delivered_messages_mutex_);
+    
+    // Check if any sender has exceeded the cleanup threshold
+    for (const auto& [sender_id, seq_set] : delivered_messages_) {
+        if (seq_set.size() > DELIVERED_MESSAGES_CLEANUP_THRESHOLD) {
+            return true;
+        }
+    }
+    
+    return false;
 }

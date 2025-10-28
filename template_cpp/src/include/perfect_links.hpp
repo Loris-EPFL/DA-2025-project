@@ -101,10 +101,14 @@ private:
     std::atomic<bool> running_;
     std::atomic<uint32_t> next_sequence_number_;  // Protocol-managed sequence numbers
     
-    // Performance tuning constants - easily configurable for optimization
+    // Timing constants for retransmission
     static constexpr std::chrono::milliseconds RETRANSMISSION_TIMEOUT{100};  // Reduced from 500ms for higher throughput
     static constexpr std::chrono::milliseconds RETRANSMISSION_SLEEP{2};      // Reduced from 5ms for more aggressive retransmission
     static constexpr std::chrono::milliseconds MAX_ADAPTIVE_TIMEOUT{1000};   // Reduced from 2000ms for faster recovery
+    
+    // Cleanup constants for delivered_messages_ memory management
+    static constexpr size_t DELIVERED_MESSAGES_CLEANUP_THRESHOLD = 50000;  // Cleanup when we have this many delivered messages per sender
+    static constexpr size_t DELIVERED_MESSAGES_KEEP_RECENT = 10000;        // Keep this many recent sequence numbers per sender after cleanup
     
     // Threading
     std::thread receiver_thread_;
@@ -206,6 +210,28 @@ private:
      * Main retransmission loop - runs in separate thread
      */
     void retransmissionLoop();
+    
+    /**
+     * Clean up old delivered messages that have been persisted to disk
+     * This method safely removes old sequence numbers from delivered_messages_
+     * while preserving recent ones needed for duplicate detection
+     * @param sender_id The sender ID to clean up (if 0, clean up all senders)
+     */
+    void cleanupDeliveredMessages(uint8_t sender_id = 0);
+    
+    /**
+     * Check if cleanup should be triggered based on delivered_messages_ size
+     * @return true if cleanup is needed
+     */
+    bool shouldCleanupDeliveredMessages();
+    
+    /**
+     * Helper method to clean up delivered messages for a specific sender
+     * This method assumes delivered_messages_mutex_ is already locked
+     * @param sender_id The sender ID to clean up
+     * @param seq_set Reference to the sequence number set for this sender
+     */
+    void cleanupSenderDeliveredMessages(uint8_t sender_id, std::set<uint32_t>& seq_set);
     
     // Prevent copying
     PerfectLinks(const PerfectLinks&) = delete;
