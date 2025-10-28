@@ -88,7 +88,6 @@ int main(int argc, char **argv) {
 
   std::cout << "Doing some initialization...\n\n";
 
-  // Initialize Perfect Links
   try {
     // Create optimized logger for crash-time logging
     OptimizedLogger logger(parser.outputPath());
@@ -106,22 +105,22 @@ int main(int argc, char **argv) {
       g_perfect_links.store(nullptr);
       return 1;
     }
-    
+
     perfect_links.start();
-    
+
     std::cout << "Broadcasting and delivering messages...\n\n";
-    
-    // Parse configuration file to get number of messages and destination
+
+    // Read configuration
     std::ifstream config_file(parser.configPath());
     if (!config_file.is_open()) {
       std::cerr << "Failed to open config file: " << parser.configPath() << std::endl;
       return 1;
     }
-    
+
     int num_messages, destination_id;
     config_file >> num_messages >> destination_id;
     config_file.close();
-    
+
     std::cout << "Sending " << num_messages << " messages to process " << destination_id << std::endl;
     
     // Only sender processes log broadcast events
@@ -144,7 +143,7 @@ int main(int argc, char **argv) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
       }
     }
-    
+
     // After a process finishes broadcasting,
     // it waits forever for the delivery of messages.
     while (!g_shutdown_requested.load()) {

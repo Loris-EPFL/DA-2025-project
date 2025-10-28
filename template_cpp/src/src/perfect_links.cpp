@@ -30,9 +30,29 @@ PerfectLinks::PerfectLinks(Parser::Host localhost,
     // (it will be incremented when sending first message)
 }
 
+void PerfectLinks::sendAck(uint8_t sender_id, uint32_t sequence_number) {
+    // Create ACK message - the ACK should contain the original sender_id and sequence_number
+    // so the sender can match it with their pending message
+    PLMessage ack_msg;
+    ack_msg.sender_id = sender_id;  // Original sender's ID (for matching)
+    ack_msg.peer_id = static_cast<uint32_t>(process_id_);  // Who is sending the ACK
+    ack_msg.sequence_number = sequence_number;  // Original sequence number
+    ack_msg.message_type = MessageType::ACK;
+    ack_msg.payload = 0;
+    ack_msg.ack_required = false;
+    
+    // Send ACK to the original sender
+    auto it = id_to_peer_.find(sender_id);
+    if (it != id_to_peer_.end()) {
+        sendMessage(ack_msg, it->second);
+    }
+}
+
 // Destructor
 PerfectLinks::~PerfectLinks() {
     stop();
+    // Write all logs to file before destruction
+    writeLogsToFile();
 }
 
 // Initialize the Perfect Links system
@@ -295,9 +315,9 @@ void PerfectLinks::receiveLoop() {
 }
 
 void PerfectLinks::handleMessage(const PLMessage& msg, const struct sockaddr_in& sender_addr) {
-    if (msg.message_type == MessageType::DATA) {  // DATA message
+    if (msg.message_type == MessageType::DATA) {
         handleDataMessage(msg, sender_addr);
-    } else if (msg.message_type == MessageType::ACK) {  // ACK message
+    } else if (msg.message_type == MessageType::ACK) {
         handleAckMessage(msg);
     }
 }
@@ -336,10 +356,13 @@ void PerfectLinks::handleDataMessage(const PLMessage& msg, const struct sockaddr
     // Send ACK first to ensure reliability
     PLMessage ack_msg(static_cast<uint32_t>(process_id_), sender_id, seq_num, msg_clock, MessageType::ACK, false);
     
-    // Find sender host using O(1) lookup
-    auto it = id_to_peer_.find(sender_id);
-    if (it != id_to_peer_.end()) {
-        sendMessage(ack_msg, it->second);
+    // Use simple check-and-insert approach - this is safe because:
+    // 1. Each message has a unique (sender_id, sequence_number) pair
+    // 2. The Perfect Links algorithm guarantees no duplicate deliveries
+    // 3. We only insert, never remove from delivered_messages_
+    if (delivered_messages_.find(msg_key) == delivered_messages_.end()) {
+        // First time seeing this message - deliver it
+        delivered_messages_.insert(msg_key);
         
         // Mark as delivered BEFORE calling callback to prevent race conditions
         {
@@ -357,6 +380,7 @@ void PerfectLinks::handleDataMessage(const PLMessage& msg, const struct sockaddr
             }
         }
     }
+    // If message already delivered, silently ignore (no duplicate delivery)
 }
 
 void PerfectLinks::handleAckMessage(const PLMessage& msg) {
@@ -367,7 +391,8 @@ void PerfectLinks::handleAckMessage(const PLMessage& msg) {
     std::lock_guard<std::mutex> lock(pending_messages_mutex_);
     auto it = pending_messages_.find(std::make_pair(sender_id, seq_num));
     if (it != pending_messages_.end()) {
-        it->second.ack_received = true;
+        it->second.ack_received.store(true);
+        // Message will be cleaned up in retransmissionLoop
     }
     // Note: If message not found, it might have been already cleaned up by retransmission thread
 }
@@ -382,7 +407,11 @@ void PerfectLinks::retransmissionLoop() {
     constexpr auto CLEANUP_INTERVAL = std::chrono::seconds(30); // Check for cleanup every 30 seconds
     
     while (running_) {
-        auto now = std::chrono::steady_clock::now();
+        // Retransmit every 100ms (reasonable for network conditions)
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        
+        // Create a copy of pending messages to avoid holding locks during transmission
+        std::vector<std::pair<MessageId, PendingMessage>> messages_to_retransmit;
         
         // Process retransmissions and cleanup in a single critical section
         // to avoid race conditions between retransmission and ACK handling
