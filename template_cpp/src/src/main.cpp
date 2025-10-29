@@ -7,7 +7,6 @@
 #include "parser.hpp"
 #include "hello.h"
 #include "perfect_links.hpp"
-#include "host_utils.hpp"
 #include "logger.hpp"
 #include <signal.h>
 
@@ -90,15 +89,28 @@ int main(int argc, char **argv) {
 
   // Initialize Perfect Links
   try {
-    // Create optimized logger for crash-time logging
+    // Create logger for crash-time logging
     Logger logger(parser.outputPath());
     
-    // Use modern constructor with HostUtils helpers
-    auto localhost = HostUtils::findLocalhost(hosts, static_cast<uint8_t>(parser.id()));
-    auto idToPeer = HostUtils::createIdToPeerMap(hosts);
+    // Find localhost from hosts vector
+    Parser::Host localhost;
+    bool found_localhost = false;
+    for (const auto& host : hosts) {
+      if (host.id == parser.id()) {
+        localhost = host;
+        found_localhost = true;
+        break;
+      }
+    }
+    
+    if (!found_localhost) {
+      std::cerr << "Could not find localhost with id " << parser.id() << std::endl;
+      return 1;
+    }
+    
     auto deliveryCallback = logger.createDeliveryCallback();
     
-    PerfectLinks perfect_links(localhost, deliveryCallback, idToPeer, parser.outputPath());
+    PerfectLinks perfect_links(localhost, deliveryCallback, hosts, parser.outputPath());
     g_perfect_links.store(&perfect_links);
     
     if (!perfect_links.initialize()) {
@@ -124,20 +136,19 @@ int main(int argc, char **argv) {
     
     std::cout << "Sending " << num_messages << " messages to process " << destination_id << std::endl;
     
-    // Only sender processes log broadcast events
-    // Receiver processes only log delivery events (handled by delivery callback)
+    // Only sender processes log broadcast events //TODO will probably change this for futures milestones
     if (parser.id() != static_cast<unsigned long>(destination_id)) {
-      // Send messages and log broadcast events using optimized logger
+      // Send messages and log broadcast events
       for (int i = 1; i <= num_messages; ++i) {
-        // Log broadcast event (lock-free)
+        // Log broadcast event
         logger.logBroadcast(static_cast<uint32_t>(i));
         
         perfect_links.send(static_cast<uint8_t>(destination_id), static_cast<uint32_t>(i));
-        // Small delay to avoid overwhelming the network
+        // Small delay to avoid overwhelming the network 
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
       }
     } else {
-      // Receiver process: only send messages, delivery logging handled by callback
+      // Receiver process: only send messages //TODO will probably change this for futures milestones
       for (int i = 1; i <= num_messages; ++i) {
         perfect_links.send(static_cast<uint8_t>(destination_id), static_cast<uint32_t>(i));
         // Small delay to avoid overwhelming the network

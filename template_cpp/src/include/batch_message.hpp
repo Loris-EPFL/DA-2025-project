@@ -6,25 +6,20 @@
 #include <cstring>
 
 /**
- * Batch Message Format for Perfect Links
- * 
- * Allows up to 8 messages per UDP packet as per TA requirement.
- * This improves throughput by reducing the number of UDP packets sent.
+ * Batch message support for UDP packets
  * 
  * Packet Format:
  * [BatchHeader][PLMessage1][PLMessage2]...[PLMessageN] (N <= 8)
- * 
- * Each PLMessage is serialized individually within the batch.
  */
 
 /**
- * Header for batch messages containing metadata about the batch
+ * Header for batch messages
  */
 struct BatchHeader {
-    uint32_t magic_number;      // Magic number to identify batch packets (0xBATCH001)
-    uint32_t message_count;     // Number of messages in this batch (1-8)
-    uint32_t total_size;        // Total size of the entire batch packet
-    uint32_t reserved;          // Reserved for future use
+    uint32_t magic_number;
+    uint32_t message_count;
+    uint32_t total_size;
+    uint32_t reserved;
     
     static constexpr uint32_t MAGIC_NUMBER = 0xBA7C4001;
     static constexpr uint32_t MAX_MESSAGES_PER_BATCH = 8;
@@ -47,7 +42,7 @@ struct BatchHeader {
 class BatchMessage {
 public:
     static constexpr uint32_t MAX_MESSAGES_PER_BATCH = 8;
-    static constexpr size_t MAX_UDP_PACKET_SIZE = 65507; // Max UDP payload size
+    static constexpr size_t MAX_UDP_PACKET_SIZE = 65507;
     
 private:
     std::vector<PLMessage> messages_;

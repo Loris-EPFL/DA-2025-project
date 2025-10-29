@@ -33,13 +33,12 @@ void Logger::logBroadcast(uint32_t sequence_number) {
     if (index < MAX_LOG_ENTRIES) {
         log_buffer_[index] = formatBroadcast(sequence_number);
         
-        // Check if we should trigger periodic flush (non-blocking check)
+        // Check if we should trigger periodic flush
         if ((index + 1) % PERIODIC_FLUSH_THRESHOLD == 0) {
             periodicFlush(false);
         }
     } else {
-        // If we exceed the buffer, we need to flush immediately
-        // This is a safety mechanism, though it should rarely happen
+        // If we exceed the buffer, flush immediately
         flushOnCrash();
     }
 }
@@ -51,39 +50,33 @@ void Logger::logDelivery(uint32_t sender_id, uint32_t sequence_number) {
     if (index < MAX_LOG_ENTRIES) {
         log_buffer_[index] = formatDelivery(sender_id, sequence_number);
         
-        // Check if we should trigger periodic flush (non-blocking check)
+        // Check if we should trigger periodic flush
         if ((index + 1) % PERIODIC_FLUSH_THRESHOLD == 0) {
             periodicFlush(false);
         }
     } else {
-        // If we exceed the buffer, we need to flush immediately
-        // This is a safety mechanism, though it should rarely happen
+        // If we exceed the buffer, flush immediately
         flushOnCrash();
     }
 }
-
+// Logger after a process crash, allowed by the description
 void Logger::flushOnCrash() {
     // Use compare_exchange to ensure we only flush once
     bool expected = false;
     if (!flushed_.compare_exchange_strong(expected, true)) {
-        // Already flushed by another thread
         return;
     }
     
     try {
-        // For crash-time flush, we need to handle both scenarios:
-        // 1. If periodic flushes have occurred, append remaining entries
-        // 2. If no periodic flushes, write all entries (overwrite mode for compatibility)
-        
         size_t last_flushed = last_flushed_count_.load();
         size_t current_count = log_count_.load();
         
         std::ofstream output_file;
         if (last_flushed > 0) {
-            // Periodic flushes have occurred, append remaining entries
+            // Append remaining entries
             output_file.open(output_path_, std::ios::app);
         } else {
-            // No periodic flushes, write all entries (overwrite for compatibility)
+            // Write all entries
             output_file.open(output_path_);
         }
         
@@ -92,7 +85,7 @@ void Logger::flushOnCrash() {
             return;
         }
         
-        // Write log entries (all if no periodic flush, or remaining if periodic flushes occurred)
+        // Write log entries
         size_t start_index = (last_flushed > 0) ? last_flushed : 0;
         size_t entries_written = 0;
         
@@ -185,13 +178,13 @@ std::function<void(uint32_t, uint32_t)> Logger::createDeliveryCallback() {
         }
     };
 }
-
+//Broadcast message format
 std::string Logger::formatBroadcast(uint32_t sequence_number) {
     std::ostringstream oss;
     oss << "b " << sequence_number;
     return oss.str();
 }
-
+//Delivery message format
 std::string Logger::formatDelivery(uint32_t sender_id, uint32_t sequence_number) {
     std::ostringstream oss;
     oss << "d " << sender_id << " " << sequence_number;

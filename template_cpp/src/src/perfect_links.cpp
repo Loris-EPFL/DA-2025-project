@@ -1,5 +1,4 @@
 #include "perfect_links.hpp"
-#include "host_utils.hpp"
 #include <iostream>
 #include <chrono>
 #include <algorithm>
@@ -10,23 +9,25 @@
 #include <fcntl.h>
 #include <errno.h>
 
-// Modern constructor using Parser-based approach
+// Constructor
 PerfectLinks::PerfectLinks(Parser::Host localhost,
                           std::function<void(uint32_t, uint32_t)> deliveryCallback,
-                          std::map<uint8_t, Parser::Host> idToPeer,
+                          const std::vector<Parser::Host>& hosts,
                           const std::string& output_path)
     : process_id_(static_cast<uint8_t>(localhost.id)), 
       localhost_(localhost),
-      id_to_peer_(std::move(idToPeer)),
+      id_to_peer_(),
       delivery_callback_(std::move(deliveryCallback)),
       output_path_(output_path),
       socket_fd_(-1), 
       local_vector_clock_(),
       running_(false),
-      next_sequence_number_(1)  // Start sequence numbers from 1
+      next_sequence_number_(1)
 {  
-    // Initialize local vector clock - set this process's clock to 0
-    // (it will be incremented when sending first message)
+    // Create ID to peer map from hosts vector
+    for (const auto& host : hosts) {
+        id_to_peer_[static_cast<uint8_t>(host.id)] = host;
+    }
 }
 
 // Destructor
@@ -150,7 +151,7 @@ void PerfectLinks::stop() {
     std::cout << "Perfect Links stopped." << std::endl;
 }
 
-// Send a message to a specific destination using Perfect Links
+// Send a message to a specific destination (generic payload vector of bytes)
 void PerfectLinks::send(uint8_t destination_id, const std::vector<uint8_t>& payload) {
     if (!running_) {
         return;
@@ -166,8 +167,9 @@ void PerfectLinks::send(uint8_t destination_id, const std::vector<uint8_t>& payl
     // Get next sequence number
     uint32_t seq_num = next_sequence_number_.fetch_add(1);
     
-    // Create message with updated vector clock
-    local_vector_clock_.increment(process_id_);  // Increment our own clock
+    // TODO: Vector clock increment - not needed for now
+    // Will be re-enabled for future milestones if needed for causal ordering
+    // local_vector_clock_.increment(process_id_);
     PLMessage msg(static_cast<uint32_t>(process_id_), destination_id, seq_num, local_vector_clock_, MessageType::DATA, payload, true);
     
     // Store for retransmission
@@ -182,11 +184,11 @@ void PerfectLinks::send(uint8_t destination_id, const std::vector<uint8_t>& payl
         pending_messages_[destination_id][seq_num] = pending;
     }
     
-    // Send using batching for better throughput (8 messages per packet)
+    // Send using batching
     sendBatchedMessage(msg, destination_id);
 }
 
-// Overloaded method: Send a message with integer payload (just converts to vector of bytes and call above send)
+// Send a message with integer payload (overloaded method that uses the send method with byte vector) //TODO keep or just use the one with byte vector ?
 void PerfectLinks::send(uint8_t destination_id, uint32_t message) {
     // Convert integer to byte vector
     std::vector<uint8_t> payload(sizeof(uint32_t));
@@ -203,7 +205,7 @@ void PerfectLinks::broadcast(const std::vector<uint8_t>& payload) {
     }
 }
 
-// Convenience method: Broadcast a message with integer payload
+// Broadcast a message with integer payload
 void PerfectLinks::broadcast(uint32_t message) {
     // Convert integer to byte vector
     std::vector<uint8_t> payload(sizeof(uint32_t));
@@ -211,11 +213,9 @@ void PerfectLinks::broadcast(uint32_t message) {
     broadcast(payload);
 }
 
-// Private helper methods
-
 void PerfectLinks::sendMessage(const PLMessage& msg, const Parser::Host& destination) {
     if (socket_fd_ < 0 || !running_) {
-        return;  // Socket not initialized or system stopped
+        return;
     }
     
     struct sockaddr_in dest_addr;
@@ -260,17 +260,17 @@ void PerfectLinks::receiveLoop() {
             std::cerr << "Socket closed during receive loop" << std::endl;
             break;
         }
-        
+        // Receive message from socket
         ssize_t received = recvfrom(socket_fd_, buffer.data(), buffer.size(), 0,
                                    reinterpret_cast<struct sockaddr*>(&sender_addr), &addr_len);
         
         if (received < 0) {
             if (errno == EAGAIN) {
                 // Non-blocking socket, no data available
-                std::this_thread::sleep_for(std::chrono::microseconds(500));  // Increased from 100 microseconds for better stability
+                std::this_thread::sleep_for(std::chrono::microseconds(500)); //TODO check delay value ?
                 continue;
             } else if (errno == EINTR) {
-                // Interrupted by signal, continue
+                // Interrupted by signal, continue //TODO probably change after
                 continue;
             } else {
                 std::cerr << "Failed to receive message: " << strerror(errno) << std::endl;
@@ -306,12 +306,14 @@ void PerfectLinks::handleDataMessage(const PLMessage& msg, const struct sockaddr
     uint32_t seq_num = msg.sequence_number;
     const VectorClock& msg_clock = msg.vector_clock;
     
+    // TODO: Vector clock update - not needed for now
+    // Will be re-enabled for future milestones if needed for causal ordering
     // Update our local vector clock with the received message's clock
     // This needs to be thread-safe as multiple threads might access it
-    {
-        std::lock_guard<std::mutex> clock_lock(delivered_messages_mutex_);  // Reuse mutex for simplicity
-        local_vector_clock_.update(msg_clock);
-    }
+    // {
+    //     std::lock_guard<std::mutex> clock_lock(delivered_messages_mutex_);  // Reuse mutex for simplicity
+    //     local_vector_clock_.update(msg_clock);
+    // }
     
     // Check if we've already delivered this message
     bool already_delivered = false;
@@ -404,8 +406,8 @@ void PerfectLinks::retransmissionLoop() {
                         sendMessage(pending.message, pending.destination);
                         pending.last_sent = now;
                         
-                        // Adaptive timeout: increase timeout for persistent failures
-                        // This helps under severe network conditions or process interference
+                        // Adaptive timeout: increase timeout for persistent failures after 5 retransmissions
+                        // This helps under severe network conditions or process interference from the tc.py script
                         if (pending.retransmit_count > 5) {
                             current_timeout = std::min(
                                 MAX_ADAPTIVE_TIMEOUT, 
@@ -418,7 +420,7 @@ void PerfectLinks::retransmissionLoop() {
             }
             
             // Second pass: ONLY clean up acknowledged messages
-            // NEVER remove unacknowledged messages - keep retransmitting forever
+            // keep retransmitting unacknowledged messages forever
             for (auto dest_it = pending_messages_.begin(); dest_it != pending_messages_.end();) {
                 for (auto msg_it = dest_it->second.begin(); msg_it != dest_it->second.end();) {
                     if (msg_it->second.ack_received) {
@@ -437,7 +439,7 @@ void PerfectLinks::retransmissionLoop() {
             }
         }
         
-        // Periodic cleanup of delivered_messages_ (outside critical section)
+        // Periodic cleanup of delivered_messages_ 
         // Only perform cleanup if enough time has passed and cleanup is needed
         if ((now - last_cleanup_time) > CLEANUP_INTERVAL && shouldCleanupDeliveredMessages()) {
             cleanupDeliveredMessages(); // Clean up all senders
@@ -519,7 +521,7 @@ void PerfectLinks::flushAllBatches() {
         }
     }
 }
-
+//Send a batch message to a destination
 void PerfectLinks::sendBatchToDestination(const BatchMessage& batch, const Parser::Host& destination) {
     std::vector<uint8_t> buffer;
     if (!batch.serialize(buffer)) {
@@ -532,7 +534,7 @@ void PerfectLinks::sendBatchToDestination(const BatchMessage& batch, const Parse
     dest_addr.sin_family = AF_INET;
     dest_addr.sin_addr.s_addr = destination.ip;
     dest_addr.sin_port = destination.port;
-    
+    //Send the batch message to socket
     ssize_t sent = sendto(socket_fd_, buffer.data(), buffer.size(), 0,
                          reinterpret_cast<struct sockaddr*>(&dest_addr), sizeof(dest_addr));
     
@@ -559,7 +561,7 @@ bool PerfectLinks::handleBatchedMessage(const std::vector<uint8_t>& buffer, cons
     }
     return true;
 }
-
+//Cleanup delivered messages set like perfect Links algos
 void PerfectLinks::cleanupDeliveredMessages(uint8_t sender_id) {
     std::lock_guard<std::mutex> lock(delivered_messages_mutex_);
     

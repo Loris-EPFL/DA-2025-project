@@ -3,7 +3,6 @@
 #include "parser.hpp"
 #include "pl_message.hpp"
 #include "batch_message.hpp"
-#include "host_utils.hpp"
 #include <vector>
 #include <string>
 #include <thread>
@@ -20,11 +19,7 @@
 
 
 /**
- * 
- * We need to ensure the perfect links properties:
- * - PL1 (Reliable delivery): If a correct process p sends a message m to a correct process q, then q eventually delivers m
- * - PL2 (No duplication): No message is delivered by a process more than once
- * - PL3 (No creation): If a process q delivers a message m with sender p, then m was previously sent to q by process p
+ * Perfect Links implementation for reliable point-to-point communication
  */
 class PerfectLinks {
 public:
@@ -33,7 +28,7 @@ public:
      */
     PerfectLinks(Parser::Host localhost,
                 std::function<void(uint32_t, uint32_t)> deliveryCallback,
-                std::map<uint8_t, Parser::Host> idToPeer,
+                const std::vector<Parser::Host>& hosts,
                 const std::string& output_path);
     
 
@@ -63,14 +58,14 @@ public:
     void stop();
     
     /**
-     * Send a message to a specific destination using Perfect Links
+     * Send a message to a specific destination
      * @param destination_id ID of the destination process
-     * @param payload The message payload to send (we use a vector of uint8_t for arbitrary bytes)
+     * @param payload The message payload to send
      */
     void send(uint8_t destination_id, const std::vector<uint8_t>& payload);
     
     /**
-     * Overlaoded method: Send a message with integer payload (just converts to vector of bytes and call above send)
+     * Send a message with integer payload
      * @param destination_id ID of the destination process
      * @param message The integer message to send
      */
@@ -78,12 +73,12 @@ public:
     
     /**
      * Broadcast a message to all other processes
-     * @param payload The message payload to broadcast (we use a vector of uint8_t for arbitrary bytes)
+     * @param payload The message payload to broadcast
      */
     void broadcast(const std::vector<uint8_t>& payload);
     
     /**
-     * Convenience method: Broadcast an integer message to all other processes
+     * Broadcast an integer message to all other processes
      * @param message The integer message to broadcast
      */
     void broadcast(uint32_t message);
@@ -92,23 +87,22 @@ private:
     // Process variables
     uint8_t process_id_;
     Parser::Host localhost_;
-    std::map<uint8_t, Parser::Host> id_to_peer_; // Map of process ID to peer host information, consistent uint8_t type
-    std::function<void(uint32_t, uint32_t)> delivery_callback_; // Callback after message delivery, useful for logging
+    std::map<uint8_t, Parser::Host> id_to_peer_;
+    std::function<void(uint32_t, uint32_t)> delivery_callback_;
     std::string output_path_;
     int socket_fd_;
-    VectorClock local_vector_clock_;  // Local vector clock for this process (kept for future causal ordering features)
+    VectorClock local_vector_clock_;
     std::atomic<bool> running_;
-    std::atomic<uint32_t> next_sequence_number_;  // Protocol-managed sequence numbers
+    std::atomic<uint32_t> next_sequence_number_;
     
     // Timing constants for retransmission
-    static constexpr std::chrono::milliseconds RETRANSMISSION_TIMEOUT{100};  // Timeout after which we retransmit a message
-    static constexpr std::chrono::milliseconds RETRANSMISSION_SLEEP{2};      // Pause between retransmission attempts
-    static constexpr std::chrono::milliseconds MAX_ADAPTIVE_TIMEOUT{1000};   // Under the tc.py script, augment retransmission timeout to 1000ms to avoid timeout
+    static constexpr std::chrono::milliseconds RETRANSMISSION_TIMEOUT{100};
+    static constexpr std::chrono::milliseconds RETRANSMISSION_SLEEP{2};
+    static constexpr std::chrono::milliseconds MAX_ADAPTIVE_TIMEOUT{1000};
     
     // Memory management constants for delivered_messages_ cleanup
-    // These values balance memory usage vs. duplicate detection capability
-    static constexpr size_t DELIVERED_MESSAGES_CLEANUP_THRESHOLD = 50000;  // Cleanup when we have this many delivered messages per sender (prevents unbounded growth)
-    static constexpr size_t DELIVERED_MESSAGES_KEEP_RECENT = 10000;        // Keep this many recent sequence numbers per sender after cleanup (maintains duplicate detection window)
+    static constexpr size_t DELIVERED_MESSAGES_CLEANUP_THRESHOLD = 50000;
+    static constexpr size_t DELIVERED_MESSAGES_KEEP_RECENT = 10000;
     
     // Threading
     std::thread receiver_thread_;
@@ -135,13 +129,12 @@ private:
     std::map<uint8_t, std::set<uint32_t>> delivered_messages_;
     std::mutex delivered_messages_mutex_;
     
-    // Message batching support for 8 messages per packet
-    std::map<uint8_t, std::vector<PLMessage>> pending_batches_;  // destination_id -> batch of messages
+    // Batching for efficiency
+    std::map<uint8_t, std::vector<PLMessage>> pending_batches_;
     std::mutex pending_batches_mutex_;
-    // Per-destination batch timing (moved from global to per-destination for correctness)
     std::map<uint8_t, std::chrono::steady_clock::time_point> last_batch_time_;
-    static constexpr std::chrono::milliseconds BATCH_TIMEOUT{5}; // Send batch after 5ms
-    static constexpr size_t MAX_BATCH_SIZE = 8; // Maximum messages per batch
+    static constexpr std::chrono::milliseconds BATCH_TIMEOUT{5};
+    static constexpr size_t MAX_BATCH_SIZE = 8;
     
     // Private helper methods
     
@@ -217,7 +210,7 @@ private:
     
     /**
      * Clean up old delivered messages that have been persisted to disk
-     * This method safely removes old sequence numbers from delivered_messages_
+     * This method removes old sequence numbers from delivered_messages_
      * while preserving recent ones needed for duplicate detection
      * @param sender_id The sender ID to clean up (if 0, clean up all senders)
      */

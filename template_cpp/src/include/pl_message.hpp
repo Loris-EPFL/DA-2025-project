@@ -7,12 +7,11 @@
 #include <cstring>
 
 /**
- * Simple Vector Clock implementation for distributed systems
- * Uses a fixed-size array for efficiency (max 128 processes)
+ * Vector Clock implementation //TODO use external library if allowed ?
  */
 class VectorClock {
 public:
-    static constexpr size_t MAX_PROCESSES = 128; //Max number of processes at a time from the project desc
+    static constexpr size_t MAX_PROCESSES = 128;
     
 private:
     std::array<uint32_t, MAX_PROCESSES> clock_;
@@ -92,40 +91,40 @@ public:
  * Message types for Perfect Links protocol
  */
 enum class MessageType : uint32_t {
-    DATA = 0,           // Data message containing payload
-    ACK = 1,            // Acknowledgment message
-    HEARTBEAT = 2,      // Placeholder for future heartbeat messages
-    CONTROL = 3         // Placeholder for future control messages
+    DATA = 0,
+    ACK = 1,
+    HEARTBEAT = 2,
+    CONTROL = 3
 };
 
 /**
- * Perfect Links Message structure for reliable point-to-point communication
- * Contains all necessary information for message delivery and acknowledgment
+ * Perfect Links Message structure
+ * Contains information for message delivery and ack
  */
 /**
- * Serializable header for PLMessage - safe for network transmission
+ * Serializable header for PLMessage
  */
 struct PLMessageHeader {
-    uint32_t sender_id;        // ID of the process that sent this message
-    uint32_t peer_id;          // ID of the intended recipient process
-    uint32_t sequence_number;  // Protocol-managed sequence number for ordering/deduplication
-    VectorClock vector_clock;  // Vector clock for causal ordering
-    MessageType message_type;  // Type of message (DATA, ACK, etc.)
-    uint32_t payload_size;     // Size of the payload in bytes
-    bool ack_required;         // Whether this message requires acknowledgment
+    uint32_t sender_id;
+    uint32_t peer_id;
+    uint32_t sequence_number;
+    VectorClock vector_clock;
+    MessageType message_type;
+    uint32_t payload_size;
+    bool ack_required;
     
     PLMessageHeader() : sender_id(0), peer_id(0), sequence_number(0), vector_clock(), 
                        message_type(MessageType::DATA), payload_size(0), ack_required(true) {}
 };
 
 struct PLMessage {
-    uint32_t sender_id;        // ID of the process that sent this message
-    uint32_t peer_id;          // ID of the intended recipient process
-    uint32_t sequence_number;  // Protocol-managed sequence number for ordering/deduplication
-    VectorClock vector_clock;  // Vector clock for causal ordering
-    MessageType message_type;  // Type of message (DATA, ACK, etc.)
-    std::vector<uint8_t> payload;  // The actual message content (opaque data)
-    bool ack_required;         // Whether this message requires acknowledgment
+    uint32_t sender_id;
+    uint32_t peer_id;
+    uint32_t sequence_number;
+    VectorClock vector_clock;
+    MessageType message_type;
+    std::vector<uint8_t> payload;
+    bool ack_required;
     
     // Default constructor
     PLMessage() : sender_id(0), peer_id(0), sequence_number(0), vector_clock(), 
@@ -150,7 +149,7 @@ struct PLMessage {
           message_type(type), payload(), ack_required(ack_req) {}
     
     /**
-     * Serialize message to a buffer for network transmission
+     * Serialize message to a buffer for transmission
      * @param buffer Output buffer (will be resized as needed)
      * @return Size of serialized data
      */

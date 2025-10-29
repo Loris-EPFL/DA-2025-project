@@ -7,30 +7,18 @@
 #include <functional>
 
 /**
- * Logger - High-performance logging with periodic and crash-time persistence
- * 
- * This logger eliminates mutex contention during normal operation by buffering
- * log events in memory and periodically writing to disk with file appending.
- * It also maintains crash-time persistence when the process receives
- * SIGTERM or SIGINT signals, as allowed by the DA Project specifications.
- * 
- * Key benefits:
- * - No mutex locking during message delivery (lock-free operation)
- * - Periodic file appending for incremental persistence
- * - Batch I/O for better performance
- * - Crash-safe logging via signal handler
- * - Thread-safe append operations using atomic operations
+ * Logger for event logging with crash-safe persistence
  */
 class Logger {
 public:
     /**
      * Constructor
-     * @param output_path Path to the output file where logs will be written on crash
+     * @param output_path Path to the output file
      */
     explicit Logger(const std::string& output_path);
     
     /**
-     * Destructor - ensures logs are flushed if not already done
+     * Destructor
      */
     ~Logger();
     
@@ -49,14 +37,13 @@ public:
     
     /**
      * Flush all buffered logs to disk (called from signal handler)
-     * This is the only function that performs file I/O
      * Thread-safe and can be called from signal handlers
      */
     void flushOnCrash();
     
     /**
      * Perform periodic flush of buffered logs to disk with file appending
-     * This method appends new log entries to the existing file without clearing it
+     * appends new log entries to the existing file without clearing it
      * Thread-safe and designed for periodic calls during normal operation
      * @param force_flush If true, flush all entries; if false, only flush when buffer reaches threshold
      */
@@ -83,14 +70,14 @@ private:
     std::string output_path_;
     
     // Lock-free log buffer using atomic operations
-    // We use a simple approach: pre-allocate a large buffer and use atomic index
-    static constexpr size_t MAX_LOG_ENTRIES = 1000000; // 1M entries should be enough
-    static constexpr size_t PERIODIC_FLUSH_THRESHOLD = 10000; // Flush every 10K entries
+    // pre-allocate a large buffer and use atomic index
+    static constexpr size_t MAX_LOG_ENTRIES = 1000000;
+    static constexpr size_t PERIODIC_FLUSH_THRESHOLD = 10000;
     
     std::vector<std::string> log_buffer_;
     std::atomic<size_t> log_count_{0};
-    std::atomic<size_t> last_flushed_count_{0}; // Track last flushed position for periodic dumps
-    std::atomic<bool> flushed_{false}; // For crash-time flush protection
+    std::atomic<size_t> last_flushed_count_{0};
+    std::atomic<bool> flushed_{false};
     
     // Helper to format log entries
     std::string formatBroadcast(uint32_t sequence_number);
@@ -99,6 +86,6 @@ private:
 
 /**
  * Global logger instance for signal handler access
- * This needs to be global so the signal handler can access it
+ * signal handler can access it
  */
 extern std::atomic<Logger*> g_optimized_logger;
