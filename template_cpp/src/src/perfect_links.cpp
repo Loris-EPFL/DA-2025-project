@@ -13,7 +13,7 @@
 // Modern constructor using Parser-based approach
 PerfectLinks::PerfectLinks(Parser::Host localhost,
                           std::function<void(uint32_t, uint32_t)> deliveryCallback,
-                          std::map<unsigned long, Parser::Host> idToPeer,
+                          std::map<uint8_t, Parser::Host> idToPeer,
                           const std::string& output_path)
     : process_id_(static_cast<uint8_t>(localhost.id)), 
       localhost_(localhost),
@@ -23,9 +23,8 @@ PerfectLinks::PerfectLinks(Parser::Host localhost,
       socket_fd_(-1), 
       local_vector_clock_(),
       running_(false),
-      next_sequence_number_(1),  // Start sequence numbers from 1
-      last_batch_time_(std::chrono::steady_clock::now()) {  // Initialize batch timer
-    
+      next_sequence_number_(1)  // Start sequence numbers from 1
+{  
     // Initialize local vector clock - set this process's clock to 0
     // (it will be incremented when sending first message)
 }
@@ -180,14 +179,14 @@ void PerfectLinks::send(uint8_t destination_id, const std::vector<uint8_t>& payl
         pending.last_sent = std::chrono::steady_clock::now();
         pending.ack_received = false;
         
-        pending_messages_[std::make_pair(destination_id, seq_num)] = pending;
+        pending_messages_[destination_id][seq_num] = pending;
     }
     
     // Send using batching for better throughput (8 messages per packet)
     sendBatchedMessage(msg, destination_id);
 }
 
-// Convenience method: Send a message with integer payload
+// Overloaded method: Send a message with integer payload (just converts to vector of bytes and call above send)
 void PerfectLinks::send(uint8_t destination_id, uint32_t message) {
     // Convert integer to byte vector
     std::vector<uint8_t> payload(sizeof(uint32_t));
@@ -365,9 +364,12 @@ void PerfectLinks::handleAckMessage(const PLMessage& msg) {
     
     // Mark the corresponding message as acknowledged
     std::lock_guard<std::mutex> lock(pending_messages_mutex_);
-    auto it = pending_messages_.find(std::make_pair(sender_id, seq_num));
-    if (it != pending_messages_.end()) {
-        it->second.ack_received = true;
+    auto dest_it = pending_messages_.find(sender_id);
+    if (dest_it != pending_messages_.end()) {
+        auto msg_it = dest_it->second.find(seq_num);
+        if (msg_it != dest_it->second.end()) {
+            msg_it->second.ack_received = true;
+        }
     }
     // Note: If message not found, it might have been already cleaned up by retransmission thread
 }
@@ -391,36 +393,46 @@ void PerfectLinks::retransmissionLoop() {
             
             // First pass: retransmit messages that need it
             // INFINITE RETRANSMISSION: Keep retransmitting until ACK received
-            for (auto& pair : pending_messages_) {
-                PendingMessage& pending = pair.second;
-                
-                if (!pending.ack_received && 
-                    (now - pending.last_sent) > current_timeout) {
+            for (auto& dest_pair : pending_messages_) {
+                for (auto& msg_pair : dest_pair.second) {
+                    PendingMessage& pending = msg_pair.second;
                     
-                    // Retransmit indefinitely until ACK received
-                    sendMessage(pending.message, pending.destination);
-                    pending.last_sent = now;
-                    
-                    // Adaptive timeout: increase timeout for persistent failures
-                    // This helps under severe network conditions or process interference
-                    if (pending.retransmit_count > 5) {
-                        current_timeout = std::min(
-                            MAX_ADAPTIVE_TIMEOUT, 
-                            base_timeout * (1 + pending.retransmit_count / 10)
-                        );
+                    if (!pending.ack_received && 
+                        (now - pending.last_sent) > current_timeout) {
+                        
+                        // Retransmit indefinitely until ACK received
+                        sendMessage(pending.message, pending.destination);
+                        pending.last_sent = now;
+                        
+                        // Adaptive timeout: increase timeout for persistent failures
+                        // This helps under severe network conditions or process interference
+                        if (pending.retransmit_count > 5) {
+                            current_timeout = std::min(
+                                MAX_ADAPTIVE_TIMEOUT, 
+                                base_timeout * (1 + pending.retransmit_count / 10)
+                            );
+                        }
+                        pending.retransmit_count++;
                     }
-                    pending.retransmit_count++;
                 }
             }
             
             // Second pass: ONLY clean up acknowledged messages
             // NEVER remove unacknowledged messages - keep retransmitting forever
-            auto it = pending_messages_.begin();
-            while (it != pending_messages_.end()) {
-                if (it->second.ack_received) {
-                    it = pending_messages_.erase(it);
+            for (auto dest_it = pending_messages_.begin(); dest_it != pending_messages_.end();) {
+                for (auto msg_it = dest_it->second.begin(); msg_it != dest_it->second.end();) {
+                    if (msg_it->second.ack_received) {
+                        msg_it = dest_it->second.erase(msg_it);
+                    } else {
+                        ++msg_it;
+                    }
+                }
+                
+                // Remove empty destination maps
+                if (dest_it->second.empty()) {
+                    dest_it = pending_messages_.erase(dest_it);
                 } else {
-                    ++it;
+                    ++dest_it;
                 }
             }
         }
@@ -450,13 +462,17 @@ void PerfectLinks::sendBatchedMessage(const PLMessage& msg, uint8_t destination_
     
     if (pending_batches_[destination_id].size() >= MAX_BATCH_SIZE) {
         should_flush = true;
-    } else if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last_batch_time_) >= BATCH_TIMEOUT) {
-        should_flush = true;
+    } else {
+        auto last_time_it = last_batch_time_.find(destination_id);
+        if (last_time_it != last_batch_time_.end() && 
+            std::chrono::duration_cast<std::chrono::milliseconds>(now - last_time_it->second) >= BATCH_TIMEOUT) {
+            should_flush = true;
+        }
     }
     
     if (should_flush) {
         flushBatch(destination_id);
-        last_batch_time_ = now;
+        last_batch_time_[destination_id] = now;
     }
 }
 

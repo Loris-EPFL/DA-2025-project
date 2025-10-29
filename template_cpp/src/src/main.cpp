@@ -33,7 +33,7 @@ static void stop(int) {
   }
 
   // Flush logs to disk (crash-time logging)
-  OptimizedLogger* logger = g_optimized_logger.load();
+  Logger* logger = g_optimized_logger.load();
   if (logger) {
     logger->flushOnCrash();
   }
@@ -72,8 +72,8 @@ int main(int argc, char **argv) {
     std::cout << host.id << "\n";
     std::cout << "Human-readable IP: " << host.ipReadable() << "\n";
     std::cout << "Machine-readable IP: " << host.ip << "\n";
-    std::cout << "Human-readbale Port: " << host.portReadable() << "\n";
-    std::cout << "Machine-readbale Port: " << host.port << "\n";
+    std::cout << "Human-readable Port: " << host.portReadable() << "\n";
+    std::cout << "Machine-readable Port: " << host.port << "\n";
     std::cout << "\n";
   }
   std::cout << "\n";
@@ -91,10 +91,10 @@ int main(int argc, char **argv) {
   // Initialize Perfect Links
   try {
     // Create optimized logger for crash-time logging
-    OptimizedLogger logger(parser.outputPath());
+    Logger logger(parser.outputPath());
     
     // Use modern constructor with HostUtils helpers
-    auto localhost = HostUtils::findLocalhost(hosts, parser.id());
+    auto localhost = HostUtils::findLocalhost(hosts, static_cast<uint8_t>(parser.id()));
     auto idToPeer = HostUtils::createIdToPeerMap(hosts);
     auto deliveryCallback = logger.createDeliveryCallback();
     

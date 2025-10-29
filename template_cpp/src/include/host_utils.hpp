@@ -10,7 +10,7 @@ namespace HostUtils {
      * @param hosts Vector of hosts from Parser::hosts()
      * @return Map for O(1) host lookups by ID
      */
-    std::map<unsigned long, Parser::Host> createIdToPeerMap(const std::vector<Parser::Host>& hosts);
+    std::map<uint8_t, Parser::Host> createIdToPeerMap(const std::vector<Parser::Host>& hosts);
     
     /**
      * @brief Finds localhost from the hosts list
@@ -19,7 +19,7 @@ namespace HostUtils {
      * @return The localhost Host object
      * @throws std::runtime_error if localhost not found
      */
-    Parser::Host findLocalhost(const std::vector<Parser::Host>& hosts, unsigned long process_id);
+    Parser::Host findLocalhost(const std::vector<Parser::Host>& hosts, uint8_t process_id);
     
     /**
      * @brief Creates a delivery callback function for Perfect Links
@@ -34,5 +34,5 @@ namespace HostUtils {
      * @param process_id The process ID to validate
      * @return true if process ID exists, false otherwise
      */
-    bool isValidProcessId(const std::vector<Parser::Host>& hosts, unsigned long process_id);
+    bool isValidProcessId(const std::vector<Parser::Host>& hosts, uint8_t process_id);
 }

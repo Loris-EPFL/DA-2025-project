@@ -20,9 +20,8 @@
 
 
 /**
- * Perfect Links implementation for reliable point-to-point communication
  * 
- * Provides the following guarantees:
+ * We need to ensure the perfect links properties:
  * - PL1 (Reliable delivery): If a correct process p sends a message m to a correct process q, then q eventually delivers m
  * - PL2 (No duplication): No message is delivered by a process more than once
  * - PL3 (No creation): If a process q delivers a message m with sender p, then m was previously sent to q by process p
@@ -30,17 +29,17 @@
 class PerfectLinks {
 public:
     /**
-     * Modern constructor using Parser-based approach
+     * constructor with Parser given by TAs
      */
     PerfectLinks(Parser::Host localhost,
                 std::function<void(uint32_t, uint32_t)> deliveryCallback,
-                std::map<unsigned long, Parser::Host> idToPeer,
+                std::map<uint8_t, Parser::Host> idToPeer,
                 const std::string& output_path);
     
 
     
     /**
-     * Destructor - ensures proper cleanup
+     * Destructor
      */
     ~PerfectLinks();
     
@@ -66,55 +65,56 @@ public:
     /**
      * Send a message to a specific destination using Perfect Links
      * @param destination_id ID of the destination process
-     * @param payload The message payload to send (opaque data)
+     * @param payload The message payload to send (we use a vector of uint8_t for arbitrary bytes)
      */
     void send(uint8_t destination_id, const std::vector<uint8_t>& payload);
     
     /**
-     * Broadcast a message to all other processes
-     * @param payload The message payload to broadcast (opaque data)
-     */
-    void broadcast(const std::vector<uint8_t>& payload);
-    
-    /**
-     * Convenience method: Send a message with integer payload
+     * Overlaoded method: Send a message with integer payload (just converts to vector of bytes and call above send)
      * @param destination_id ID of the destination process
      * @param message The integer message to send
      */
     void send(uint8_t destination_id, uint32_t message);
     
     /**
-     * Convenience method: Broadcast a message with integer payload
+     * Broadcast a message to all other processes
+     * @param payload The message payload to broadcast (we use a vector of uint8_t for arbitrary bytes)
+     */
+    void broadcast(const std::vector<uint8_t>& payload);
+    
+    /**
+     * Convenience method: Broadcast an integer message to all other processes
      * @param message The integer message to broadcast
      */
     void broadcast(uint32_t message);
 
 private:
-    // Core member variables
+    // Process variables
     uint8_t process_id_;
     Parser::Host localhost_;
-    std::map<unsigned long, Parser::Host> id_to_peer_;
-    std::function<void(uint32_t, uint32_t)> delivery_callback_;
+    std::map<uint8_t, Parser::Host> id_to_peer_; // Map of process ID to peer host information, consistent uint8_t type
+    std::function<void(uint32_t, uint32_t)> delivery_callback_; // Callback after message delivery, useful for logging
     std::string output_path_;
     int socket_fd_;
-    VectorClock local_vector_clock_;  // Local vector clock for this process
+    VectorClock local_vector_clock_;  // Local vector clock for this process (kept for future causal ordering features)
     std::atomic<bool> running_;
     std::atomic<uint32_t> next_sequence_number_;  // Protocol-managed sequence numbers
     
     // Timing constants for retransmission
-    static constexpr std::chrono::milliseconds RETRANSMISSION_TIMEOUT{100};  // Reduced from 500ms for higher throughput
-    static constexpr std::chrono::milliseconds RETRANSMISSION_SLEEP{2};      // Reduced from 5ms for more aggressive retransmission
-    static constexpr std::chrono::milliseconds MAX_ADAPTIVE_TIMEOUT{1000};   // Reduced from 2000ms for faster recovery
+    static constexpr std::chrono::milliseconds RETRANSMISSION_TIMEOUT{100};  // Timeout after which we retransmit a message
+    static constexpr std::chrono::milliseconds RETRANSMISSION_SLEEP{2};      // Pause between retransmission attempts
+    static constexpr std::chrono::milliseconds MAX_ADAPTIVE_TIMEOUT{1000};   // Under the tc.py script, augment retransmission timeout to 1000ms to avoid timeout
     
-    // Cleanup constants for delivered_messages_ memory management
-    static constexpr size_t DELIVERED_MESSAGES_CLEANUP_THRESHOLD = 50000;  // Cleanup when we have this many delivered messages per sender
-    static constexpr size_t DELIVERED_MESSAGES_KEEP_RECENT = 10000;        // Keep this many recent sequence numbers per sender after cleanup
+    // Memory management constants for delivered_messages_ cleanup
+    // These values balance memory usage vs. duplicate detection capability
+    static constexpr size_t DELIVERED_MESSAGES_CLEANUP_THRESHOLD = 50000;  // Cleanup when we have this many delivered messages per sender (prevents unbounded growth)
+    static constexpr size_t DELIVERED_MESSAGES_KEEP_RECENT = 10000;        // Keep this many recent sequence numbers per sender after cleanup (maintains duplicate detection window)
     
     // Threading
     std::thread receiver_thread_;
     std::thread retransmission_thread_;
     
-    // Message tracking
+    // Message tracking - using nested maps for consistent structure and efficient operations
     struct PendingMessage {
         PLMessage message;
         Parser::Host destination;
@@ -125,17 +125,21 @@ private:
         PendingMessage() : ack_received(false), retransmit_count(0) {}
     };
     
-    std::map<std::pair<uint8_t, uint32_t>, PendingMessage> pending_messages_;
+    // Track pending messages: sender_id -> (seq_num -> PendingMessage)
+    // Mutex protects against concurrent access from send/retransmission threads
+    std::map<uint8_t, std::map<uint32_t, PendingMessage>> pending_messages_;
     std::mutex pending_messages_mutex_;
     
-    // Track delivered messages to prevent duplicates (sender_id -> set of sequence numbers)
+    // Track delivered messages to prevent duplicates: sender_id -> set of sequence numbers
+    // Mutex protects against concurrent access from receive thread and cleanup operations
     std::map<uint8_t, std::set<uint32_t>> delivered_messages_;
     std::mutex delivered_messages_mutex_;
     
     // Message batching support for 8 messages per packet
-    std::map<uint8_t, std::vector<PLMessage>> pending_batches_;  // Use destination_id as key instead of Host
+    std::map<uint8_t, std::vector<PLMessage>> pending_batches_;  // destination_id -> batch of messages
     std::mutex pending_batches_mutex_;
-    std::chrono::steady_clock::time_point last_batch_time_;
+    // Per-destination batch timing (moved from global to per-destination for correctness)
+    std::map<uint8_t, std::chrono::steady_clock::time_point> last_batch_time_;
     static constexpr std::chrono::milliseconds BATCH_TIMEOUT{5}; // Send batch after 5ms
     static constexpr size_t MAX_BATCH_SIZE = 8; // Maximum messages per batch
     

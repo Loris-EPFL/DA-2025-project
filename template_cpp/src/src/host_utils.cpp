@@ -7,24 +7,24 @@
 
 namespace HostUtils {
     
-    std::map<unsigned long, Parser::Host> createIdToPeerMap(const std::vector<Parser::Host>& hosts) {
-        std::map<unsigned long, Parser::Host> idToPeer;
+    std::map<uint8_t, Parser::Host> createIdToPeerMap(const std::vector<Parser::Host>& hosts) {
+        std::map<uint8_t, Parser::Host> idToPeer;
         
         for (const auto& host : hosts) {
-            idToPeer[host.id] = host;
+            idToPeer[static_cast<uint8_t>(host.id)] = host;
         }
         
         return idToPeer;
     }
     
-    Parser::Host findLocalhost(const std::vector<Parser::Host>& hosts, unsigned long process_id) {
+    Parser::Host findLocalhost(const std::vector<Parser::Host>& hosts, uint8_t process_id) {
         for (const auto& host : hosts) {
             if (host.id == process_id) {
                 return host;
             }
         }
         
-        throw std::runtime_error("Localhost with ID " + std::to_string(process_id) + " not found in hosts list");
+        throw std::runtime_error("Localhost with ID " + std::to_string(static_cast<unsigned int>(process_id)) + " not found in hosts list");
     }
     
     std::function<void(uint32_t, uint32_t)> createDeliveryCallback(const std::string& output_path) {
@@ -47,7 +47,7 @@ namespace HostUtils {
         };
     }
     
-    bool isValidProcessId(const std::vector<Parser::Host>& hosts, unsigned long process_id) {
+    bool isValidProcessId(const std::vector<Parser::Host>& hosts, uint8_t process_id) {
         for (const auto& host : hosts) {
             if (host.id == process_id) {
                 return true;

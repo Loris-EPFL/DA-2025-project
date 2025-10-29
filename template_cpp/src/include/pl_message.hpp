@@ -12,7 +12,7 @@
  */
 class VectorClock {
 public:
-    static constexpr size_t MAX_PROCESSES = 128;
+    static constexpr size_t MAX_PROCESSES = 128; //Max number of processes at a time from the project desc
     
 private:
     std::array<uint32_t, MAX_PROCESSES> clock_;

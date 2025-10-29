@@ -7,7 +7,7 @@
 #include <functional>
 
 /**
- * OptimizedLogger - High-performance logging with periodic and crash-time persistence
+ * Logger - High-performance logging with periodic and crash-time persistence
  * 
  * This logger eliminates mutex contention during normal operation by buffering
  * log events in memory and periodically writing to disk with file appending.
@@ -21,18 +21,18 @@
  * - Crash-safe logging via signal handler
  * - Thread-safe append operations using atomic operations
  */
-class OptimizedLogger {
+class Logger {
 public:
     /**
      * Constructor
      * @param output_path Path to the output file where logs will be written on crash
      */
-    explicit OptimizedLogger(const std::string& output_path);
+    explicit Logger(const std::string& output_path);
     
     /**
      * Destructor - ensures logs are flushed if not already done
      */
-    ~OptimizedLogger();
+    ~Logger();
     
     /**
      * Log a broadcast event (thread-safe, lock-free)
@@ -101,4 +101,4 @@ private:
  * Global logger instance for signal handler access
  * This needs to be global so the signal handler can access it
  */
-extern std::atomic<OptimizedLogger*> g_optimized_logger;
+extern std::atomic<Logger*> g_optimized_logger;

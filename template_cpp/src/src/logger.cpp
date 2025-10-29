@@ -4,9 +4,9 @@
 #include <sstream>
 
 // Global logger instance for signal handler access
-std::atomic<OptimizedLogger*> g_optimized_logger{nullptr};
+std::atomic<Logger*> g_optimized_logger{nullptr};
 
-OptimizedLogger::OptimizedLogger(const std::string& output_path) 
+Logger::Logger(const std::string& output_path) 
     : output_path_(output_path) {
     // Pre-allocate the log buffer to avoid reallocations
     log_buffer_.resize(MAX_LOG_ENTRIES);
@@ -15,18 +15,18 @@ OptimizedLogger::OptimizedLogger(const std::string& output_path)
     g_optimized_logger.store(this);
 }
 
-OptimizedLogger::~OptimizedLogger() {
+Logger::~Logger() {
     // Ensure logs are flushed if not already done
     if (!flushed_.load()) {
         flushOnCrash();
     }
     
     // Clear global reference
-    OptimizedLogger* expected = this;
+    Logger* expected = this;
     g_optimized_logger.compare_exchange_strong(expected, nullptr);
 }
 
-void OptimizedLogger::logBroadcast(uint32_t sequence_number) {
+void Logger::logBroadcast(uint32_t sequence_number) {
     size_t index = log_count_.fetch_add(1, std::memory_order_relaxed);
     
     // Check bounds to prevent buffer overflow
@@ -44,7 +44,7 @@ void OptimizedLogger::logBroadcast(uint32_t sequence_number) {
     }
 }
 
-void OptimizedLogger::logDelivery(uint32_t sender_id, uint32_t sequence_number) {
+void Logger::logDelivery(uint32_t sender_id, uint32_t sequence_number) {
     size_t index = log_count_.fetch_add(1, std::memory_order_relaxed);
     
     // Check bounds to prevent buffer overflow
@@ -62,7 +62,7 @@ void OptimizedLogger::logDelivery(uint32_t sender_id, uint32_t sequence_number) 
     }
 }
 
-void OptimizedLogger::flushOnCrash() {
+void Logger::flushOnCrash() {
     // Use compare_exchange to ensure we only flush once
     bool expected = false;
     if (!flushed_.compare_exchange_strong(expected, true)) {
@@ -116,7 +116,7 @@ void OptimizedLogger::flushOnCrash() {
     }
 }
 
-void OptimizedLogger::periodicFlush(bool force_flush) {
+void Logger::periodicFlush(bool force_flush) {
     size_t current_count = log_count_.load();
     size_t last_flushed = last_flushed_count_.load();
     
@@ -165,17 +165,17 @@ void OptimizedLogger::periodicFlush(bool force_flush) {
     }
 }
 
-bool OptimizedLogger::shouldPeriodicFlush() const {
+bool Logger::shouldPeriodicFlush() const {
     size_t current_count = log_count_.load();
     size_t last_flushed = last_flushed_count_.load();
     return (current_count - last_flushed) >= PERIODIC_FLUSH_THRESHOLD;
 }
 
-size_t OptimizedLogger::getBufferedCount() const {
+size_t Logger::getBufferedCount() const {
     return log_count_.load();
 }
 
-std::function<void(uint32_t, uint32_t)> OptimizedLogger::createDeliveryCallback() {
+std::function<void(uint32_t, uint32_t)> Logger::createDeliveryCallback() {
     // Return a lambda that captures this logger instance
     return [this](uint32_t sender_id, uint32_t sequence_number) noexcept {
         try {
@@ -186,13 +186,13 @@ std::function<void(uint32_t, uint32_t)> OptimizedLogger::createDeliveryCallback(
     };
 }
 
-std::string OptimizedLogger::formatBroadcast(uint32_t sequence_number) {
+std::string Logger::formatBroadcast(uint32_t sequence_number) {
     std::ostringstream oss;
     oss << "b " << sequence_number;
     return oss.str();
 }
 
-std::string OptimizedLogger::formatDelivery(uint32_t sender_id, uint32_t sequence_number) {
+std::string Logger::formatDelivery(uint32_t sender_id, uint32_t sequence_number) {
     std::ostringstream oss;
     oss << "d " << sender_id << " " << sequence_number;
     return oss.str();
