@@ -9,17 +9,17 @@
 #include <mutex>
 #include <atomic>
 #include <fstream>
-#include <map>
-#include <chrono>
 #include <functional>
-#include <set>
+#include <map>
+#include <unordered_set>
+
 #include <sys/socket.h>
 #include <netinet/in.h>
 
 
 
 /**
- * Perfect Links implementation for reliable point-to-point communication
+ * Perfect Links implementation
  */
 class PerfectLinks {
 public:
@@ -65,7 +65,7 @@ public:
     void send(uint8_t destination_id, const std::vector<uint8_t>& payload);
     
     /**
-     * Send a message with integer payload
+     * Send a message with integer payload (overloaded for convenience) //TODO only use the send vector of bytes method ?
      * @param destination_id ID of the destination process
      * @param message The integer message to send
      */
@@ -124,9 +124,9 @@ private:
     std::map<uint8_t, std::map<uint32_t, PendingMessage>> pending_messages_;
     std::mutex pending_messages_mutex_;
     
-    // Track delivered messages to prevent duplicates: sender_id -> set of sequence numbers
+    // Track delivered messages to prevent duplicates: sender_id -> unordered_set of sequence numbers
     // Mutex protects against concurrent access from receive thread and cleanup operations
-    std::map<uint8_t, std::set<uint32_t>> delivered_messages_;
+    std::map<uint8_t, std::unordered_set<uint32_t>> delivered_messages_;
     std::mutex delivered_messages_mutex_;
     
     // Batching for efficiency
@@ -210,8 +210,8 @@ private:
     
     /**
      * Clean up old delivered messages that have been persisted to disk
-     * This method removes old sequence numbers from delivered_messages_
-     * while preserving recent ones needed for duplicate detection
+     * removes old sequence numbers from delivered_messages_
+     * while keeping recent ones needed for duplicate detection
      * @param sender_id The sender ID to clean up (if 0, clean up all senders)
      */
     void cleanupDeliveredMessages(uint8_t sender_id = 0);
@@ -228,7 +228,7 @@ private:
      * @param sender_id The sender ID to clean up
      * @param seq_set Reference to the sequence number set for this sender
      */
-    void cleanupSenderDeliveredMessages(uint8_t sender_id, std::set<uint32_t>& seq_set);
+    void cleanupSenderDeliveredMessages(uint8_t sender_id, std::unordered_set<uint32_t>& seq_set);
     
     // Prevent copying
     PerfectLinks(const PerfectLinks&) = delete;

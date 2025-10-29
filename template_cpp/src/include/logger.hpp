@@ -7,7 +7,7 @@
 #include <functional>
 
 /**
- * Logger for event logging with crash-safe persistence
+ * Logger for event logging with crash-safe persistence (only allowed action after crash)
  */
 class Logger {
 public:

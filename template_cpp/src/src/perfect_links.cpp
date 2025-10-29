@@ -65,18 +65,18 @@ bool PerfectLinks::initialize() {
         return false;
     }
     
-    // Increase socket buffer sizes for high-load scenarios
+    // socket buffer sizes
     int send_buffer_size = 1024 * 1024;  // 1MB send buffer
     int recv_buffer_size = 1024 * 1024;  // 1MB receive buffer
     
     if (setsockopt(socket_fd_, SOL_SOCKET, SO_SNDBUF, &send_buffer_size, sizeof(send_buffer_size)) < 0) {
         std::cerr << "Warning: Failed to set send buffer size: " << strerror(errno) << std::endl;
-        // Continue anyway - this is not critical
+        // Continue
     }
     
     if (setsockopt(socket_fd_, SOL_SOCKET, SO_RCVBUF, &recv_buffer_size, sizeof(recv_buffer_size)) < 0) {
         std::cerr << "Warning: Failed to set receive buffer size: " << strerror(errno) << std::endl;
-        // Continue anyway - this is not critical
+        // Continue
     }
     
     // Bind socket to localhost
@@ -267,16 +267,22 @@ void PerfectLinks::receiveLoop() {
         if (received < 0) {
             if (errno == EAGAIN) {
                 // Non-blocking socket, no data available
-                std::this_thread::sleep_for(std::chrono::microseconds(500)); //TODO check delay value ?
+                // Use exponential backoff to reduce CPU usage when idle
+                static thread_local auto idle_sleep = std::chrono::microseconds(10);
+                std::this_thread::sleep_for(idle_sleep);
+                idle_sleep = std::min(idle_sleep * 2, std::chrono::microseconds(1000));
                 continue;
             } else if (errno == EINTR) {
-                // Interrupted by signal, continue //TODO probably change after
+                // Interrupted by signal, continue
                 continue;
             } else {
                 std::cerr << "Failed to receive message: " << strerror(errno) << std::endl;
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));
                 continue;
             }
+        } else {
+            // Reset idle sleep when we receive data
+            static thread_local auto idle_sleep = std::chrono::microseconds(10);
         }
         
         if (received > 0) {
@@ -326,7 +332,7 @@ void PerfectLinks::handleDataMessage(const PLMessage& msg, const struct sockaddr
         // Already delivered, just send ACK
         PLMessage ack_msg(static_cast<uint32_t>(process_id_), sender_id, seq_num, msg_clock, MessageType::ACK, false);
         
-        // Find sender host using O(1) lookup
+        // Find sender host
         auto it = id_to_peer_.find(sender_id);
         if (it != id_to_peer_.end()) {
             sendMessage(ack_msg, it->second);
@@ -337,7 +343,7 @@ void PerfectLinks::handleDataMessage(const PLMessage& msg, const struct sockaddr
     // Send ACK first to ensure reliability
     PLMessage ack_msg(static_cast<uint32_t>(process_id_), sender_id, seq_num, msg_clock, MessageType::ACK, false);
     
-    // Find sender host using O(1) lookup
+    // Find sender host
     auto it = id_to_peer_.find(sender_id);
     if (it != id_to_peer_.end()) {
         sendMessage(ack_msg, it->second);
@@ -364,7 +370,7 @@ void PerfectLinks::handleAckMessage(const PLMessage& msg) {
     uint8_t sender_id = static_cast<uint8_t>(msg.sender_id);
     uint32_t seq_num = msg.sequence_number;
     
-    // Mark the corresponding message as acknowledged
+    // Mark the message as acknowledged
     std::lock_guard<std::mutex> lock(pending_messages_mutex_);
     auto dest_it = pending_messages_.find(sender_id);
     if (dest_it != pending_messages_.end()) {
@@ -373,28 +379,28 @@ void PerfectLinks::handleAckMessage(const PLMessage& msg) {
             msg_it->second.ack_received = true;
         }
     }
-    // Note: If message not found, it might have been already cleaned up by retransmission thread
+    // If message not found, it might have been already cleaned up by retransmission thread
 }
 
 void PerfectLinks::retransmissionLoop() {
-    // Adaptive timeout: start with configurable base timeout, increase under adverse conditions
+    // Adaptive timeout: start with configurable base timeout, increase under adverse conditions for the tc.py script
     auto base_timeout = RETRANSMISSION_TIMEOUT;
     auto current_timeout = base_timeout;
     
     // Cleanup tracking: perform cleanup periodically to avoid excessive overhead
     auto last_cleanup_time = std::chrono::steady_clock::now();
-    constexpr auto CLEANUP_INTERVAL = std::chrono::seconds(30); // Check for cleanup every 30 seconds
+    constexpr auto CLEANUP_INTERVAL = std::chrono::seconds(1); 
     
     while (running_) {
         auto now = std::chrono::steady_clock::now();
         
-        // Process retransmissions and cleanup in a single critical section
-        // to avoid race conditions between retransmission and ACK handling
+        // Collect messages to retransmit in a smaller critical section
+        std::vector<std::pair<PLMessage, Parser::Host>> messages_to_retransmit;
+        
         {
             std::lock_guard<std::mutex> lock(pending_messages_mutex_);
             
-            // First pass: retransmit messages that need it
-            // INFINITE RETRANSMISSION: Keep retransmitting until ACK received
+            // First pass: collect messages that need retransmission
             for (auto& dest_pair : pending_messages_) {
                 for (auto& msg_pair : dest_pair.second) {
                     PendingMessage& pending = msg_pair.second;
@@ -402,12 +408,11 @@ void PerfectLinks::retransmissionLoop() {
                     if (!pending.ack_received && 
                         (now - pending.last_sent) > current_timeout) {
                         
-                        // Retransmit indefinitely until ACK received
-                        sendMessage(pending.message, pending.destination);
+                        // Collect for retransmission outside the lock
+                        messages_to_retransmit.emplace_back(pending.message, pending.destination);
                         pending.last_sent = now;
                         
                         // Adaptive timeout: increase timeout for persistent failures after 5 retransmissions
-                        // This helps under severe network conditions or process interference from the tc.py script
                         if (pending.retransmit_count > 5) {
                             current_timeout = std::min(
                                 MAX_ADAPTIVE_TIMEOUT, 
@@ -418,7 +423,15 @@ void PerfectLinks::retransmissionLoop() {
                     }
                 }
             }
-            
+        }
+        
+        // Send messages first once outside the lock section to reduce lock usage
+        for (const auto& [msg, dest] : messages_to_retransmit) {
+            sendMessage(msg, dest);
+        }
+        
+        {   //Need mutex since multiple threads might be cleaning up the set
+            std::lock_guard<std::mutex> lock(pending_messages_mutex_);
             // Second pass: ONLY clean up acknowledged messages
             // keep retransmitting unacknowledged messages forever
             for (auto dest_it = pending_messages_.begin(); dest_it != pending_messages_.end();) {
@@ -447,7 +460,6 @@ void PerfectLinks::retransmissionLoop() {
         }
         
         // Sleep outside the critical section to reduce lock contention
-        // Shorter sleep for more aggressive retransmission under stress
         std::this_thread::sleep_for(RETRANSMISSION_SLEEP);
     }
 }
@@ -542,7 +554,7 @@ void PerfectLinks::sendBatchToDestination(const BatchMessage& batch, const Parse
         std::cerr << "Failed to send batch: " << strerror(errno) << std::endl;
     }
 }
-
+//Handler for batched messages
 bool PerfectLinks::handleBatchedMessage(const std::vector<uint8_t>& buffer, const struct sockaddr_in& sender_addr) {
     BatchMessage batch;
     if (!batch.deserialize(buffer.data(), buffer.size())) {
@@ -581,7 +593,7 @@ void PerfectLinks::cleanupDeliveredMessages(uint8_t sender_id) {
     }
 }
 
-void PerfectLinks::cleanupSenderDeliveredMessages(uint8_t sender_id, std::set<uint32_t>& seq_set) {
+void PerfectLinks::cleanupSenderDeliveredMessages(uint8_t sender_id, std::unordered_set<uint32_t>& seq_set) {
     // This method assumes delivered_messages_mutex_ is already locked
     
     if (seq_set.size() <= DELIVERED_MESSAGES_KEEP_RECENT) {

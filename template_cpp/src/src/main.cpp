@@ -159,7 +159,8 @@ int main(int argc, char **argv) {
     // After a process finishes broadcasting,
     // it waits forever for the delivery of messages.
     while (!g_shutdown_requested.load()) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      // Shorter sleep for more responsive shutdown
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     
     // Clean shutdown
