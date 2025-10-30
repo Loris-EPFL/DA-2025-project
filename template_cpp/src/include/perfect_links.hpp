@@ -26,12 +26,7 @@ public:
     /**
      * constructor with Parser given by TAs
      */
-    PerfectLinks(Parser::Host localhost,
-                std::function<void(uint32_t, uint32_t)> deliveryCallback,
-                const std::vector<Parser::Host>& hosts,
-                const std::string& output_path);
-    
-
+    PerfectLinks(Parser::Host localhost, std::function<void(uint32_t, uint32_t)> deliveryCallback, const std::vector<Parser::Host>& hosts, const std::string& output_path);
     
     /**
      * Destructor
@@ -100,7 +95,7 @@ private:
     static constexpr std::chrono::milliseconds RETRANSMISSION_SLEEP{2};
     static constexpr std::chrono::milliseconds MAX_ADAPTIVE_TIMEOUT{1000};
     
-    // Memory management constants for delivered_messages_ cleanup
+    // Memory management constants for delivered_messages_ cleanup (In practise should never run for our current test, may be useful for super high applications with tons of seq id)
     static constexpr size_t DELIVERED_MESSAGES_CLEANUP_THRESHOLD = 50000;
     static constexpr size_t DELIVERED_MESSAGES_KEEP_RECENT = 10000;
     
@@ -108,7 +103,7 @@ private:
     std::thread receiver_thread_;
     std::thread retransmission_thread_;
     
-    // Message tracking - using nested maps for consistent structure and efficient operations
+    // Message tracking
     struct PendingMessage {
         PLMessage message;
         Parser::Host destination;

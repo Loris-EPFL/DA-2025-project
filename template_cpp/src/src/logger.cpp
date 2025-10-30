@@ -6,8 +6,7 @@
 // Global logger instance for signal handler access
 std::atomic<Logger*> g_optimized_logger{nullptr};
 
-Logger::Logger(const std::string& output_path) 
-    : output_path_(output_path) {
+Logger::Logger(const std::string& output_path) : output_path_(output_path) {
     // Pre-allocate the log buffer to avoid reallocations
     log_buffer_.resize(MAX_LOG_ENTRIES);
     

@@ -7,11 +7,11 @@
 #include <cstring>
 
 /**
- * Vector Clock implementation //TODO use external library if allowed ?
+ * Vector Clock implementation , not used for now//TODO use external library if allowed ?
  */
 class VectorClock {
 public:
-    static constexpr size_t MAX_PROCESSES = 128;
+    static constexpr size_t MAX_PROCESSES = 128; //Max processes number at a time according to project descs
     
 private:
     std::array<uint32_t, MAX_PROCESSES> clock_;
@@ -90,7 +90,7 @@ public:
 /**
  * Message types for Perfect Links protocol
  */
-enum class MessageType : uint32_t {
+enum class MessageType : uint8_t {
     DATA = 0,
     ACK = 1,
     HEARTBEAT = 2,
@@ -127,26 +127,16 @@ struct PLMessage {
     bool ack_required;
     
     // Default constructor
-    PLMessage() : sender_id(0), peer_id(0), sequence_number(0), vector_clock(), 
-                  message_type(MessageType::DATA), payload(), ack_required(true) {}
+    PLMessage() : sender_id(0), peer_id(0), sequence_number(0), vector_clock(), message_type(MessageType::DATA), payload(), ack_required(true) {}
     
     // Constructor with payload
-    PLMessage(uint32_t sid, uint32_t pid, uint32_t seq_num, const VectorClock& vclock, 
-              MessageType type, const std::vector<uint8_t>& data, bool ack_req = true) 
-        : sender_id(sid), peer_id(pid), sequence_number(seq_num), vector_clock(vclock), 
-          message_type(type), payload(data), ack_required(ack_req) {}
+    PLMessage(uint32_t sid, uint32_t pid, uint32_t seq_num, const VectorClock& vclock, MessageType type, const std::vector<uint8_t>& data, bool ack_req = true) : sender_id(sid), peer_id(pid), sequence_number(seq_num), vector_clock(vclock), message_type(type), payload(data), ack_required(ack_req) {}
     
     // Constructor without payload (for ACK messages)
-    PLMessage(uint32_t sid, uint32_t pid, uint32_t seq_num, MessageType type, 
-              const std::vector<uint8_t>& data, bool ack_req = true) 
-        : sender_id(sid), peer_id(pid), sequence_number(seq_num), vector_clock(), 
-          message_type(type), payload(data), ack_required(ack_req) {}
+    PLMessage(uint32_t sid, uint32_t pid, uint32_t seq_num, MessageType type, const std::vector<uint8_t>& data, bool ack_req = true) : sender_id(sid), peer_id(pid), sequence_number(seq_num), vector_clock(), message_type(type), payload(data), ack_required(ack_req) {}
     
     // Constructor for ACK messages without payload
-    PLMessage(uint32_t sid, uint32_t pid, uint32_t seq_num, const VectorClock& vclock, 
-              MessageType type, bool ack_req = false) 
-        : sender_id(sid), peer_id(pid), sequence_number(seq_num), vector_clock(vclock), 
-          message_type(type), payload(), ack_required(ack_req) {}
+    PLMessage(uint32_t sid, uint32_t pid, uint32_t seq_num, const VectorClock& vclock, MessageType type, bool ack_req = false) : sender_id(sid), peer_id(pid), sequence_number(seq_num), vector_clock(vclock), message_type(type), payload(), ack_required(ack_req) {}
     
     /**
      * Serialize message to a buffer for transmission
@@ -155,6 +145,7 @@ struct PLMessage {
      */
     size_t serialize(std::vector<uint8_t>& buffer) const {
         PLMessageHeader header;
+        //Header fields
         header.sender_id = sender_id;
         header.peer_id = peer_id;
         header.sequence_number = sequence_number;
