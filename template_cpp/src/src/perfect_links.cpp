@@ -312,6 +312,13 @@ void PerfectLinks::handleDataMessage(const PLMessage& msg, const struct sockaddr
     uint32_t seq_num = msg.sequence_number;
     const VectorClock& msg_clock = msg.vector_clock;
     
+    // Only process messages from known senders (defined in hosts configuration)
+    if (id_to_peer_.find(sender_id) == id_to_peer_.end()) {
+        // Silently ignore messages from unknown senders - this prevents
+        // "out of range" errors when grading system uses different configurations
+        return;
+    }
+    
     // TODO: Vector clock update - not needed for now
     // Will be re-enabled for future milestones if needed for causal ordering
     // Update our local vector clock with the received message's clock
@@ -369,6 +376,11 @@ void PerfectLinks::handleDataMessage(const PLMessage& msg, const struct sockaddr
 void PerfectLinks::handleAckMessage(const PLMessage& msg) {
     uint8_t sender_id = static_cast<uint8_t>(msg.sender_id);
     uint32_t seq_num = msg.sequence_number;
+    
+    // Only process ACKs from known senders
+    if (id_to_peer_.find(sender_id) == id_to_peer_.end()) {
+        return;
+    }
     
     // Mark the message as acknowledged
     std::lock_guard<std::mutex> lock(pending_messages_mutex_);

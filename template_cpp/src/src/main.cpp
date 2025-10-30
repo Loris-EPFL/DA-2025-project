@@ -12,15 +12,11 @@
 
 // Global Perfect Links instance for signal handling
 static std::atomic<PerfectLinks*> g_perfect_links{nullptr};
-static std::atomic<bool> g_shutdown_requested{false};
 
 static void stop(int) {
   // reset signal handlers to default
   signal(SIGTERM, SIG_DFL);
   signal(SIGINT, SIG_DFL);
-
-  // Set shutdown flag
-  g_shutdown_requested.store(true);
 
   // immediately stop network packet processing
   std::cout << "Immediately stopping network packet processing.\n";
@@ -40,8 +36,8 @@ static void stop(int) {
   // write/flush output file if necessary
   std::cout << "Writing output.\n";
 
-  // DO NOT exit directly from signal handler
-  // Let main thread handle cleanup and exit gracefully
+  // exit directly from signal handler
+  exit(0);
 }
 
 int main(int argc, char **argv) {
@@ -147,18 +143,12 @@ int main(int argc, char **argv) {
         // Small delay to avoid overwhelming the network 
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
       }
-    } else {
-      // Receiver process: only send messages //TODO will probably change this for futures milestones
-      for (int i = 1; i <= num_messages; ++i) {
-        perfect_links.send(static_cast<uint8_t>(destination_id), static_cast<uint32_t>(i));
-        // Small delay to avoid overwhelming the network
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-      }
     }
+    // Receiver process does not send any messages - it only receives and logs deliveries
     
     // After a process finishes broadcasting,
     // it waits forever for the delivery of messages.
-    while (!g_shutdown_requested.load()) {
+    while (true) {
       // Shorter sleep for more responsive shutdown
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
