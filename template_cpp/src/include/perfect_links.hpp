@@ -129,7 +129,6 @@ private:
     std::mutex pending_batches_mutex_;
     std::map<uint8_t, std::chrono::steady_clock::time_point> last_batch_time_;
     static constexpr std::chrono::milliseconds BATCH_TIMEOUT{5};
-    static constexpr size_t MAX_BATCH_SIZE = 8; // Max 8 messages per packet like in the ED post
     
     // Private helper methods
     

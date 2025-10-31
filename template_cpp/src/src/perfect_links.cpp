@@ -546,7 +546,7 @@ void PerfectLinks::sendBatchedMessage(const PLMessage& msg, uint8_t destination_
     auto now = std::chrono::steady_clock::now();
     bool should_flush = false;
     
-    if (pending_batches_[destination_id].size() >= MAX_BATCH_SIZE) {
+    if (pending_batches_[destination_id].size() >= BatchMessage::MAX_MESSAGES_PER_BATCH) {
         should_flush = true;
     } else {
         auto last_time_it = last_batch_time_.find(destination_id);

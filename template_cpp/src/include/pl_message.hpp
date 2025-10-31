@@ -93,7 +93,7 @@ public:
 enum class MessageType : uint8_t {
     DATA = 0,
     ACK = 1,
-    HEARTBEAT = 2,
+    HEARTBEAT = 2, //Heartbeat for future milsetone using a Eventually PFD
     CONTROL = 3
 };
 
@@ -113,8 +113,7 @@ struct PLMessageHeader {
     uint32_t payload_size;
     bool ack_required;
     
-    PLMessageHeader() : sender_id(0), peer_id(0), sequence_number(0), vector_clock(), 
-                       message_type(MessageType::DATA), payload_size(0), ack_required(true) {}
+    PLMessageHeader() : sender_id(0), peer_id(0), sequence_number(0), vector_clock(), message_type(MessageType::DATA), payload_size(0), ack_required(true) {}
 };
 
 struct PLMessage {
