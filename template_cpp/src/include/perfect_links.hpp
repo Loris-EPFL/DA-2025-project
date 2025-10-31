@@ -86,7 +86,7 @@ private:
     std::function<void(uint32_t, uint32_t)> delivery_callback_;
     std::string output_path_;
     int socket_fd_;
-    VectorClock local_vector_clock_;
+    VectorClock local_vector_clock_; //Not used for now
     std::atomic<bool> running_;
     std::atomic<uint32_t> next_sequence_number_;
     
@@ -129,16 +129,17 @@ private:
     std::mutex pending_batches_mutex_;
     std::map<uint8_t, std::chrono::steady_clock::time_point> last_batch_time_;
     static constexpr std::chrono::milliseconds BATCH_TIMEOUT{5};
-    static constexpr size_t MAX_BATCH_SIZE = 8;
+    static constexpr size_t MAX_BATCH_SIZE = 8; // Max 8 messages per packet like in the ED post
     
     // Private helper methods
     
-    /**
-     * Send a message over UDP (original method for individual messages)
-     * @param msg The message to send
-     * @param destination The destination host
-     */
-    void sendMessage(const PLMessage& msg, const Parser::Host& destination);
+    //Individual version of send messages. Keep it in case batching doesn't work for some reason
+    // /**
+    //  * Send a message over UDP (method for individual messages one by one)
+    //  * @param msg The message to send
+    //  * @param destination The destination host
+    //  */
+    // void sendMessage(const PLMessage& msg, const Parser::Host& destination);
     
     /**
      * Send a message using batching (up to 8 messages per packet)

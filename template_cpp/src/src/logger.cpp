@@ -6,6 +6,7 @@
 // Global logger instance for signal handler access
 std::atomic<Logger*> g_optimized_logger{nullptr};
 
+// Constructor
 Logger::Logger(const std::string& output_path) : output_path_(output_path) {
     // Pre-allocate the log buffer to avoid reallocations
     log_buffer_.resize(MAX_LOG_ENTRIES);
@@ -13,7 +14,7 @@ Logger::Logger(const std::string& output_path) : output_path_(output_path) {
     // Register this instance globally for signal handler access
     g_optimized_logger.store(this);
 }
-
+//Destructor
 Logger::~Logger() {
     // Ensure logs are flushed if not already done
     if (!flushed_.load()) {
@@ -25,6 +26,10 @@ Logger::~Logger() {
     g_optimized_logger.compare_exchange_strong(expected, nullptr);
 }
 
+/**
+ * Log a broadcast message
+ * @param sequence_number The sequence number of the broadcast message
+ */
 void Logger::logBroadcast(uint32_t sequence_number) {
     size_t index = log_count_.fetch_add(1, std::memory_order_relaxed);
     
@@ -42,6 +47,11 @@ void Logger::logBroadcast(uint32_t sequence_number) {
     }
 }
 
+/**
+ * Log a delivery message
+ * @param sender_id The ID of the sender process
+ * @param sequence_number The sequence number of the delivered message
+ */
 void Logger::logDelivery(uint32_t sender_id, uint32_t sequence_number) {
     size_t index = log_count_.fetch_add(1, std::memory_order_relaxed);
     
@@ -58,6 +68,7 @@ void Logger::logDelivery(uint32_t sender_id, uint32_t sequence_number) {
         flushOnCrash();
     }
 }
+
 // Logger after a process crash, allowed by the description
 void Logger::flushOnCrash() {
     // Use compare_exchange to ensure we only flush once
@@ -108,6 +119,10 @@ void Logger::flushOnCrash() {
     }
 }
 
+/**
+ * Periodically flush log entries to disk
+ * @param force_flush If true, flush all entries regardless of threshold
+ */
 void Logger::periodicFlush(bool force_flush) {
     size_t current_count = log_count_.load();
     size_t last_flushed = last_flushed_count_.load();
@@ -157,16 +172,28 @@ void Logger::periodicFlush(bool force_flush) {
     }
 }
 
+/**
+ * Check if we should perform a periodic flush based on current buffer size, should not happen under realistic conditions
+ * @return true if periodic flush should be performed
+ */
 bool Logger::shouldPeriodicFlush() const {
     size_t current_count = log_count_.load();
     size_t last_flushed = last_flushed_count_.load();
     return (current_count - last_flushed) >= PERIODIC_FLUSH_THRESHOLD;
 }
 
+/**
+ * Get the current number of buffered log entries
+ * @return Number of buffered log entries
+ */
 size_t Logger::getBufferedCount() const {
     return log_count_.load();
 }
 
+/**
+ * Create a delivery callback function that logs deliveries
+ * @return Delivery callback function
+ */
 std::function<void(uint32_t, uint32_t)> Logger::createDeliveryCallback() {
     // Return a lambda that captures this logger instance
     return [this](uint32_t sender_id, uint32_t sequence_number) noexcept {

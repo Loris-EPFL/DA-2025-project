@@ -22,7 +22,7 @@ struct BatchHeader {
     uint32_t reserved;
     
     static constexpr uint32_t BATCH_HEADER_SIGNATURE = 0x424D5347;  // "BMSG" in ASCII
-    static constexpr uint32_t MAX_MESSAGES_PER_BATCH = 8;
+    static constexpr uint8_t MAX_MESSAGES_PER_BATCH = 8; //Max number of messages per packet, here 8 according to the TAs
     
     BatchHeader() : magic_number(BATCH_HEADER_SIGNATURE), message_count(0), total_size(0), reserved(0) {}
     
@@ -40,7 +40,7 @@ struct BatchHeader {
  */
 class BatchMessage {
 public:
-    static constexpr uint32_t MAX_MESSAGES_PER_BATCH = 8;
+    static constexpr uint8_t MAX_MESSAGES_PER_BATCH = 8; //Max number of messages per packet, here 8 according to the TAs
     static constexpr size_t MAX_UDP_PACKET_SIZE = 65507;
     
 private:
