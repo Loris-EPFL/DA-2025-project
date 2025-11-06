@@ -283,8 +283,7 @@ void PerfectLinks::receiveLoop() {
             break;
         }
         // Receive message from socket
-        ssize_t received = recvfrom(socket_fd_, buffer.data(), buffer.size(), 0,
-                                   reinterpret_cast<struct sockaddr*>(&sender_addr), &addr_len);
+        ssize_t received = recvfrom(socket_fd_, buffer.data(), buffer.size(), 0, reinterpret_cast<struct sockaddr*>(&sender_addr), &addr_len);
         
         if (received < 0) {
             if (errno == EAGAIN) {
@@ -698,8 +697,7 @@ void PerfectLinks::cleanupSenderDeliveredMessages(uint8_t sender_id, std::unorde
         seq_set.erase(seq_numbers[i]);
     }
     
-    std::cout << "Cleaned up " << to_remove << " old delivered message records for sender " 
-              << static_cast<int>(sender_id) << ", kept " << seq_set.size() << " recent ones" << std::endl;
+    std::cout << "Cleaned up " << to_remove << " old delivered message records for sender " << static_cast<int>(sender_id) << ", kept " << seq_set.size() << " recent ones" << std::endl;
 }
 
 /**
