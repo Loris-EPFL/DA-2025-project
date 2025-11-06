@@ -7,6 +7,7 @@
 #include "parser.hpp"
 #include "perfect_links.hpp"
 #include "logger.hpp"
+#include "urb.hpp"
 #include <signal.h>
 
 // Global Perfect Links instance for signal handling
@@ -99,8 +100,27 @@ int main(int argc, char **argv) {
       std::cerr << "Could not find localhost with id " << parser.id() << std::endl;
       return 1;
     }
-    // Create delivery callback for logger deliveries and broadcasts
-    auto deliveryCallback = logger.createDeliveryCallback();
+    // Parse FIFO config: first line is number of messages (m)
+    int num_messages = 0;
+    {
+      std::ifstream config_file(parser.configPath());
+      if (!config_file.is_open()) {
+        std::cerr << "Failed to open config file: " << parser.configPath() << std::endl;
+        return 1;
+      }
+      if (!(config_file >> num_messages)) {
+        std::cerr << "Invalid FIFO config format (expected single integer m)" << std::endl;
+        return 1;
+      }
+      config_file.close();
+    }
+
+    // Create URB instance and delivery callback that forwards payloads (URB logs deliveries)
+    UniformReliableBroadcast urb(static_cast<uint8_t>(parser.id()), hosts, logger);
+    auto deliveryCallback = [&urb](uint32_t sender_id, uint32_t sequence_number, const std::vector<uint8_t>& payload) noexcept {
+      // Forward PL deliveries up to URB; URB decides and logs deliveries
+      try { urb.onPerfectLinksDeliver(sender_id, sequence_number, payload); } catch (...) {}
+    };
     
     // Initialize Perfect Links with logger
     PerfectLinks perfect_links(localhost, deliveryCallback, hosts, parser.outputPath());
@@ -113,35 +133,19 @@ int main(int argc, char **argv) {
     }
     //Start the actual Perfect Links system
     perfect_links.start();
+    // Give URB access to Perfect Links for rebroadcasts
+    urb.setPerfectLinks(&perfect_links);
     
-    std::cout << "Broadcasting and delivering messages...\n\n";
+    std::cout << "Broadcasting and delivering messages (FIFO mode)...\n\n";
     
-    // Parse configuration file to get number of messages and destination
-    std::ifstream config_file(parser.configPath());
-    if (!config_file.is_open()) {
-      std::cerr << "Failed to open config file: " << parser.configPath() << std::endl;
-      return 1;
+    std::cout << "Each process will broadcast " << num_messages << " messages via URB" << std::endl;
+    // FIFO/URB mode: every process broadcasts 1..m and URB logs deliveries
+    for (int i = 1; i <= num_messages; ++i) {
+      logger.logBroadcast(static_cast<uint32_t>(i));
+      urb.broadcast(static_cast<uint32_t>(i));
+      // Small delay to avoid overwhelming the network
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
-    
-    int num_messages, destination_id;
-    config_file >> num_messages >> destination_id;
-    config_file.close();
-    
-    std::cout << "Sending " << num_messages << " messages to process " << destination_id << std::endl;
-    
-    // Only sender processes log broadcast events //TODO will probably change this for futures milestones
-    if (parser.id() != static_cast<unsigned long>(destination_id)) {
-      // Send messages and log broadcast events
-      for (int i = 1; i <= num_messages; ++i) {
-        // Log broadcast event
-        logger.logBroadcast(static_cast<uint32_t>(i));
-        
-        perfect_links.send(static_cast<uint8_t>(destination_id), static_cast<uint32_t>(i));
-        // Small delay to avoid overwhelming the network 
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-      }
-    }
-    // Receiver process does not send any messages - it only receives and logs deliveries
     
     // After a process finishes broadcasting,
     // it waits forever for the delivery of messages.

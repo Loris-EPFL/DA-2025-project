@@ -11,6 +11,19 @@ Logger::Logger(const std::string& output_path) : output_path_(output_path) {
     // Pre-allocate the log buffer to avoid reallocations
     log_buffer_.resize(MAX_LOG_ENTRIES);
     
+    // Truncate output file at start of a run to avoid appending
+    // previous run's logs, which cause duplicates and FIFO violations in analysis.
+    try {
+        std::ofstream truncate_file(output_path_, std::ios::trunc);
+        if (!truncate_file.is_open()) {
+            std::cerr << "Failed to open output file for truncation: " << output_path_ << std::endl;
+        } else {
+            truncate_file.close();
+        }
+    } catch (...) {
+        std::cerr << "Unknown error while truncating output file: " << output_path_ << std::endl;
+    }
+    
     // Register this instance globally for signal handler access
     g_optimized_logger.store(this);
 }

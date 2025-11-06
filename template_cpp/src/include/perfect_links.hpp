@@ -26,7 +26,7 @@ public:
     /**
      * constructor with Parser given by TAs
      */
-    PerfectLinks(Parser::Host localhost, std::function<void(uint32_t, uint32_t)> deliveryCallback, const std::vector<Parser::Host>& hosts, const std::string& output_path);
+    PerfectLinks(Parser::Host localhost, std::function<void(uint32_t, uint32_t, const std::vector<uint8_t>&)> deliveryCallback, const std::vector<Parser::Host>& hosts, const std::string& output_path);
     
     /**
      * Destructor
@@ -83,7 +83,7 @@ private:
     uint8_t process_id_;
     Parser::Host localhost_;
     std::map<uint8_t, Parser::Host> id_to_peer_;
-    std::function<void(uint32_t, uint32_t)> delivery_callback_;
+    std::function<void(uint32_t, uint32_t, const std::vector<uint8_t>&)> delivery_callback_;
     std::string output_path_;
     int socket_fd_;
     VectorClock local_vector_clock_; //Not used for now

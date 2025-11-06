@@ -10,7 +10,7 @@
 #include <errno.h>
 
 // Constructor
-PerfectLinks::PerfectLinks(Parser::Host localhost,std::function<void(uint32_t, uint32_t)> deliveryCallback, const std::vector<Parser::Host>& hosts, const std::string& output_path): process_id_(static_cast<uint8_t>(localhost.id)), localhost_(localhost), id_to_peer_(), delivery_callback_(std::move(deliveryCallback)), output_path_(output_path), socket_fd_(-1), local_vector_clock_(), running_(false), next_sequence_number_(1)
+PerfectLinks::PerfectLinks(Parser::Host localhost,std::function<void(uint32_t, uint32_t, const std::vector<uint8_t>&)> deliveryCallback, const std::vector<Parser::Host>& hosts, const std::string& output_path): process_id_(static_cast<uint8_t>(localhost.id)), localhost_(localhost), id_to_peer_(), delivery_callback_(std::move(deliveryCallback)), output_path_(output_path), socket_fd_(-1), local_vector_clock_(), running_(false), next_sequence_number_(1)
 {  
     // Create ID to peer map from hosts vector
     for (const auto& host : hosts) {
@@ -381,7 +381,7 @@ void PerfectLinks::handleDataMessage(const PLMessage& msg, const struct sockaddr
         // Pass the message up to the next layer
         if (delivery_callback_) {
             try {
-                delivery_callback_(sender_id, seq_num); //Let callback handle it
+                delivery_callback_(sender_id, seq_num, msg.payload); //Let callback handle it
             } catch (const std::exception& e) {
                 std::cerr << "Error in delivery callback: " << e.what() << std::endl;
             }
