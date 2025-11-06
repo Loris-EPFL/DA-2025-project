@@ -5,7 +5,6 @@
 #include <atomic>
 
 #include "parser.hpp"
-#include "hello.h"
 #include "perfect_links.hpp"
 #include "logger.hpp"
 #include <signal.h>
@@ -51,9 +50,6 @@ int main(int argc, char **argv) {
   Parser parser(argc, argv);
   parser.parse();
 
-  hello();
-  std::cout << std::endl;
-
   std::cout << "My PID: " << getpid() << "\n";
   std::cout << "From a new terminal type `kill -SIGINT " << getpid() << "` or `kill -SIGTERM "
             << getpid() << "` to stop processing packets\n\n";
@@ -67,8 +63,8 @@ int main(int argc, char **argv) {
     std::cout << host.id << "\n";
     std::cout << "Human-readable IP: " << host.ipReadable() << "\n";
     std::cout << "Machine-readable IP: " << host.ip << "\n";
-    std::cout << "Human-readable Port: " << host.portReadable() << "\n";
-    std::cout << "Machine-readable Port: " << host.port << "\n";
+    std::cout << "Human-readbale Port: " << host.portReadable() << "\n";
+    std::cout << "Machine-readbale Port: " << host.port << "\n";
     std::cout << "\n";
   }
   std::cout << "\n";
@@ -103,9 +99,10 @@ int main(int argc, char **argv) {
       std::cerr << "Could not find localhost with id " << parser.id() << std::endl;
       return 1;
     }
-    
+    // Create delivery callback for logger deliveries and broadcasts
     auto deliveryCallback = logger.createDeliveryCallback();
     
+    // Initialize Perfect Links with logger
     PerfectLinks perfect_links(localhost, deliveryCallback, hosts, parser.outputPath());
     g_perfect_links.store(&perfect_links);
     
@@ -114,7 +111,7 @@ int main(int argc, char **argv) {
       g_perfect_links.store(nullptr);
       return 1;
     }
-    
+    //Start the actual Perfect Links system
     perfect_links.start();
     
     std::cout << "Broadcasting and delivering messages...\n\n";

@@ -26,12 +26,7 @@ public:
     /**
      * constructor with Parser given by TAs
      */
-    PerfectLinks(Parser::Host localhost,
-                std::function<void(uint32_t, uint32_t)> deliveryCallback,
-                const std::vector<Parser::Host>& hosts,
-                const std::string& output_path);
-    
-
+    PerfectLinks(Parser::Host localhost, std::function<void(uint32_t, uint32_t)> deliveryCallback, const std::vector<Parser::Host>& hosts, const std::string& output_path);
     
     /**
      * Destructor
@@ -91,7 +86,7 @@ private:
     std::function<void(uint32_t, uint32_t)> delivery_callback_;
     std::string output_path_;
     int socket_fd_;
-    VectorClock local_vector_clock_;
+    VectorClock local_vector_clock_; //Not used for now
     std::atomic<bool> running_;
     std::atomic<uint32_t> next_sequence_number_;
     
@@ -100,7 +95,7 @@ private:
     static constexpr std::chrono::milliseconds RETRANSMISSION_SLEEP{2};
     static constexpr std::chrono::milliseconds MAX_ADAPTIVE_TIMEOUT{1000};
     
-    // Memory management constants for delivered_messages_ cleanup
+    // Memory management constants for delivered_messages_ cleanup (In practise should never run for our current test, may be useful for super high applications with tons of seq id)
     static constexpr size_t DELIVERED_MESSAGES_CLEANUP_THRESHOLD = 50000;
     static constexpr size_t DELIVERED_MESSAGES_KEEP_RECENT = 10000;
     
@@ -108,7 +103,7 @@ private:
     std::thread receiver_thread_;
     std::thread retransmission_thread_;
     
-    // Message tracking - using nested maps for consistent structure and efficient operations
+    // Message tracking
     struct PendingMessage {
         PLMessage message;
         Parser::Host destination;
@@ -134,16 +129,16 @@ private:
     std::mutex pending_batches_mutex_;
     std::map<uint8_t, std::chrono::steady_clock::time_point> last_batch_time_;
     static constexpr std::chrono::milliseconds BATCH_TIMEOUT{5};
-    static constexpr size_t MAX_BATCH_SIZE = 8;
     
     // Private helper methods
     
-    /**
-     * Send a message over UDP (original method for individual messages)
-     * @param msg The message to send
-     * @param destination The destination host
-     */
-    void sendMessage(const PLMessage& msg, const Parser::Host& destination);
+    //Individual version of send messages. Keep it in case batching doesn't work for some reason
+    // /**
+    //  * Send a message over UDP (method for individual messages one by one)
+    //  * @param msg The message to send
+    //  * @param destination The destination host
+    //  */
+    // void sendMessage(const PLMessage& msg, const Parser::Host& destination);
     
     /**
      * Send a message using batching (up to 8 messages per packet)

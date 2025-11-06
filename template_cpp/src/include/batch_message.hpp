@@ -21,16 +21,15 @@ struct BatchHeader {
     uint32_t total_size;
     uint32_t reserved;
     
-    static constexpr uint32_t MAGIC_NUMBER = 0xBA7C4001;
-    static constexpr uint32_t MAX_MESSAGES_PER_BATCH = 8;
+    static constexpr uint32_t BATCH_HEADER_SIGNATURE = 0x424D5347;  // "BMSG" in ASCII
+    static constexpr uint8_t MAX_MESSAGES_PER_BATCH = 8; //Max number of messages per packet, here 8 according to the TAs
     
-    BatchHeader() : magic_number(MAGIC_NUMBER), message_count(0), total_size(0), reserved(0) {}
+    BatchHeader() : magic_number(BATCH_HEADER_SIGNATURE), message_count(0), total_size(0), reserved(0) {}
     
-    BatchHeader(uint32_t count, uint32_t size) 
-        : magic_number(MAGIC_NUMBER), message_count(count), total_size(size), reserved(0) {}
+    BatchHeader(uint32_t count, uint32_t size) : magic_number(BATCH_HEADER_SIGNATURE), message_count(count), total_size(size), reserved(0) {}
     
     bool isValid() const {
-        return magic_number == MAGIC_NUMBER && 
+        return magic_number == BATCH_HEADER_SIGNATURE &&
                message_count > 0 && 
                message_count <= MAX_MESSAGES_PER_BATCH;
     }
@@ -41,7 +40,7 @@ struct BatchHeader {
  */
 class BatchMessage {
 public:
-    static constexpr uint32_t MAX_MESSAGES_PER_BATCH = 8;
+    static constexpr uint8_t MAX_MESSAGES_PER_BATCH = 8; //Max number of messages per packet, here 8 according to the TAs
     static constexpr size_t MAX_UDP_PACKET_SIZE = 65507;
     
 private:
@@ -131,8 +130,7 @@ public:
         }
         
         // Create batch header
-        BatchHeader header(static_cast<uint32_t>(messages_.size()), 
-                          static_cast<uint32_t>(total_size));
+        BatchHeader header(static_cast<uint32_t>(messages_.size()), static_cast<uint32_t>(total_size));
         
         // Serialize to buffer
         buffer.resize(total_size);
@@ -184,8 +182,7 @@ public:
                 return false;
             }
             
-            const PLMessageHeader* msg_header = 
-                reinterpret_cast<const PLMessageHeader*>(buffer + offset);
+            const PLMessageHeader* msg_header = reinterpret_cast<const PLMessageHeader*>(buffer + offset);
             size_t msg_size = sizeof(PLMessageHeader) + msg_header->payload_size;
             
             if (offset + msg_size > size) {
