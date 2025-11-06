@@ -5,6 +5,7 @@
 #include <atomic>
 #include <memory>
 #include <functional>
+#include <mutex>
 
 /**
  * Logger for event logging with crash-safe persistence (only allowed action after crash)
@@ -78,6 +79,8 @@ private:
     std::atomic<size_t> log_count_{0};
     std::atomic<size_t> last_flushed_count_{0};
     std::atomic<bool> flushed_{false};
+    // Serialize flushes to avoid concurrent writes and guard against races
+    std::mutex flush_mutex_;
     
     // Helper to format log entries
     std::string formatBroadcast(uint32_t sequence_number);
