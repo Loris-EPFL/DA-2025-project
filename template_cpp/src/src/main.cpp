@@ -3,15 +3,15 @@
 #include <thread>
 #include <fstream>
 #include <atomic>
+#include <signal.h>
 
 #include "parser.hpp"
 #include "perfect_links.hpp"
 #include "logger.hpp"
 #include "urb.hpp"
-#include <signal.h>
 
 // Global Perfect Links instance for signal handling
-static std::atomic<PerfectLinks*> g_perfect_links{nullptr};
+static std::atomic<PerfectLinks*> g_perfect_links;
 
 static void stop(int) {
   // reset signal handlers to default

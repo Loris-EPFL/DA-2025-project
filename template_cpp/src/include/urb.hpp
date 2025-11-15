@@ -6,6 +6,7 @@
 #include <unordered_set>
 #include <unordered_map>
 #include <functional>
+#include <mutex>
 
 #include "parser.hpp"
 
@@ -65,13 +66,33 @@ private:
 
     // Track which forwarders have been seen for each (origin, seq)
     std::unordered_map<MsgKey, std::unordered_set<uint32_t>, MsgKeyHash> seen_forwarders_;
-    // Track delivered messages to avoid duplicates
+    // Track delivered messages to prevent duplicates
     std::unordered_set<MsgKey, MsgKeyHash> delivered_;
-
+    
+    // Synchronization
+    std::mutex state_mutex_;
+    
+    // Garbage collection state
+    size_t deliveries_since_last_gc_{0};
+    static constexpr uint32_t GC_INTERVAL = 256;
+    static constexpr uint32_t GC_MARGIN = 0;
+    
     // FIFO ordering state: next expected sequence per origin and ready set
     std::unordered_map<uint32_t, uint32_t> next_expected_seq_;
     std::unordered_map<uint32_t, std::unordered_set<uint32_t>> ready_to_deliver_;
 
     // Track messages this process has already rebroadcasted to avoid multiple re-sends
     std::unordered_set<MsgKey, MsgKeyHash> rebroadcasted_;
+    
+    // Memory management
+    void gcOnDelivery(uint32_t origin);
+    
+    struct MemStats {
+        size_t seen_keys;
+        size_t seen_total;
+        size_t rebroadcasted;
+        size_t ready_total;
+        size_t rss_kb;
+    };
+    MemStats snapshotMemStats();
 };
