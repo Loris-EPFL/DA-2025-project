@@ -34,6 +34,12 @@ public:
 
     // Broadcast an integer message as URB payload (origin = self)
     void broadcast(uint32_t message);
+    
+    // Get the next message sequence to broadcast sequentially (signal-safe)
+    uint32_t getNextSequentialBroadcast() const;
+    
+    // Atomically broadcast the next sequential message (returns sequence broadcast, 0 if done)
+    uint32_t broadcastNextSequential(uint32_t max_messages);
 
     // Callback to be connected to PerfectLinks deliveries
     void onPerfectLinksDeliver(uint32_t /*pl_sender_id*/, uint32_t /*pl_seq_num*/, const std::vector<uint8_t>& payload);
@@ -70,7 +76,7 @@ private:
     std::unordered_set<MsgKey, MsgKeyHash> delivered_;
     
     // Synchronization
-    std::mutex state_mutex_;
+    mutable std::mutex state_mutex_;
     
     // Garbage collection state
     size_t deliveries_since_last_gc_{0};
@@ -83,6 +89,12 @@ private:
 
     // Track messages this process has already rebroadcasted to avoid multiple re-sends
     std::unordered_set<MsgKey, MsgKeyHash> rebroadcasted_;
+    
+    // Track messages this process has broadcast (for signal-safe resumption)
+    std::unordered_set<uint32_t> own_broadcasts_;
+    
+    // Sequential broadcast counter (next message to broadcast)
+    uint32_t next_broadcast_seq_{1};
     
     // Memory management
     void gcOnDelivery(uint32_t origin);

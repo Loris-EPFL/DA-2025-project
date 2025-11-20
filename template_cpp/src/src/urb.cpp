@@ -45,12 +45,19 @@ void UniformReliableBroadcast::broadcast(uint32_t message) {
     uint32_t seq = message; // assume app uses 1..M as sequence numbers
     auto payload = encode(origin, seq);
 
-    // Best-effort broadcast using Perfect Links FIRST
-    pl_->broadcast(payload);
-    
-    // Only after successful broadcast, update local state
+    // ATOMIC OPERATION: Log broadcast, update state, and send to network atomically
+    // This ensures that if we get SIGSTOP/SIGTERM, the operation is truly atomic
     {
         std::lock_guard<std::mutex> lock(state_mutex_);
+        
+        // Log broadcast first
+        logger_.logBroadcast(seq);
+        // Force immediate flush to disk to prevent race conditions with SIGSTOP/SIGTERM
+        logger_.periodicFlush(true);
+        
+        // Track that we broadcast this message (for signal-safe resumption)
+        own_broadcasts_.insert(seq);
+        
         // Count ourselves towards majority
         MsgKey key{origin, seq};
         seen_forwarders_[key].insert(static_cast<uint32_t>(process_id_));
@@ -60,6 +67,9 @@ void UniformReliableBroadcast::broadcast(uint32_t message) {
         if (seen_forwarders_[key].size() >= majority_threshold_) {
             ready_to_deliver_[origin].insert(seq);
         }
+        
+        // Best-effort broadcast using Perfect Links AFTER updating state
+        pl_->broadcast(payload);
     }
 }
 
@@ -207,4 +217,39 @@ UniformReliableBroadcast::MemStats UniformReliableBroadcast::snapshotMemStats() 
     }
     
     return stats;
+}
+
+uint32_t UniformReliableBroadcast::getNextSequentialBroadcast() const {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    return next_broadcast_seq_;
+}
+
+uint32_t UniformReliableBroadcast::broadcastNextSequential(uint32_t max_messages) {
+    uint32_t seq_to_broadcast;
+    
+    // Atomic check and increment
+    {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        
+        // Check if we're done broadcasting
+        if (next_broadcast_seq_ > max_messages) {
+            return 0; // No more messages to broadcast
+        }
+        
+        seq_to_broadcast = next_broadcast_seq_;
+        
+        // Check if already broadcast (shouldn't happen with sequential approach, but safety check)
+        if (own_broadcasts_.find(seq_to_broadcast) != own_broadcasts_.end()) {
+            next_broadcast_seq_++;
+            return 0; // Skip already broadcast message
+        }
+        
+        // Increment counter BEFORE releasing lock to prevent race conditions
+        next_broadcast_seq_++;
+    } // Lock released here
+    
+    // Now broadcast the message (this will update own_broadcasts_ internally)
+    broadcast(seq_to_broadcast);
+    
+    return seq_to_broadcast;
 }

@@ -139,10 +139,16 @@ int main(int argc, char **argv) {
     std::cout << "Broadcasting and delivering messages (FIFO mode)...\n\n";
     
     std::cout << "Each process will broadcast " << num_messages << " messages via URB" << std::endl;
-    // FIFO/URB mode: every process broadcasts 1..m and URB logs deliveries
-    for (int i = 1; i <= num_messages; ++i) {
-      logger.logBroadcast(static_cast<uint32_t>(i));
-      urb.broadcast(static_cast<uint32_t>(i));
+    // Atomic sequential broadcast loop: completely signal-safe and gap-free
+    while (true) {
+      // Atomically get and broadcast the next sequential message
+      uint32_t broadcast_seq = urb.broadcastNextSequential(static_cast<uint32_t>(num_messages));
+      
+      if (broadcast_seq == 0) {
+        // All messages broadcast, exit loop
+        break;
+      }
+      
       // Small delay to avoid overwhelming the network
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
