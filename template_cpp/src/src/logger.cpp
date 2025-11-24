@@ -11,6 +11,19 @@ Logger::Logger(const std::string& output_path) : output_path_(output_path) {
     // Pre-allocate the log buffer to avoid reallocations
     log_buffer_.resize(MAX_LOG_ENTRIES);
     
+    // Truncate output file at start of a run to avoid appending
+    // previous run's logs, which cause duplicates and FIFO violations in analysis.
+    try {
+        std::ofstream truncate_file(output_path_, std::ios::trunc);
+        if (!truncate_file.is_open()) {
+            std::cerr << "Failed to open output file for truncation: " << output_path_ << std::endl;
+        } else {
+            truncate_file.close();
+        }
+    } catch (...) {
+        std::cerr << "Unknown error while truncating output file: " << output_path_ << std::endl;
+    }
+    
     // Register this instance globally for signal handler access
     g_optimized_logger.store(this);
 }
@@ -76,7 +89,7 @@ void Logger::flushOnCrash() {
     if (!flushed_.compare_exchange_strong(expected, true)) {
         return;
     }
-    
+    // Do not take mutexes inside a signal handler; write directly
     try {
         size_t last_flushed = last_flushed_count_.load();
         size_t current_count = log_count_.load();
@@ -102,6 +115,7 @@ void Logger::flushOnCrash() {
         for (size_t i = start_index; i < current_count && i < MAX_LOG_ENTRIES; ++i) {
             if (!log_buffer_[i].empty()) {
                 output_file << log_buffer_[i] << '\n';
+                log_buffer_[i].clear();
                 entries_written++;
             }
         }
@@ -109,6 +123,7 @@ void Logger::flushOnCrash() {
         // Ensure data is written to disk
         output_file.flush();
         output_file.close();
+        last_flushed_count_.store(current_count);
         
         std::cout << "Crash flush: wrote " << entries_written << " entries to " << output_path_ << std::endl;
         
@@ -136,7 +151,7 @@ void Logger::periodicFlush(bool force_flush) {
     if (!force_flush && (current_count - last_flushed) < PERIODIC_FLUSH_THRESHOLD) {
         return; // Not enough entries to warrant a flush
     }
-    
+    std::lock_guard<std::mutex> guard(flush_mutex_);
     try {
         // Open file in append mode to preserve existing content
         std::ofstream output_file(output_path_, std::ios::app);
@@ -150,6 +165,7 @@ void Logger::periodicFlush(bool force_flush) {
         for (size_t i = last_flushed; i < current_count && i < MAX_LOG_ENTRIES; ++i) {
             if (!log_buffer_[i].empty()) {
                 output_file << log_buffer_[i] << '\n';
+                log_buffer_[i].clear();
                 entries_written++;
             }
         }
