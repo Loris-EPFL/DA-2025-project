@@ -5,10 +5,20 @@
 #include <mutex>
 #include <fstream>
 
-UniformReliableBroadcast::UniformReliableBroadcast(uint8_t process_id,
-                                                   const std::vector<Parser::Host>& hosts,
-                                                   Logger& logger)
-    : process_id_(process_id), hosts_(hosts), logger_(logger) {
+
+/**
+ * FIFO implementation on top of URB
+ * 
+ * Need to respect FRB properties:
+ * - FRB1 Validity: If pi and pj are correct, every m broadcast by pi is eventually delivered by pj .
+ * - FRB2 No Duplication: No m delivered more than once.
+ * - FRB3 No Creation: No m delivered unless it was broadcast.
+ * - FRB4 Uniform Agreement: For any message m , if any process (correct or faulty) delivers m , then every correct process delivers m . (Stronger than URB4: if sender crashes after some process delivers, all correct processes must still deliver).
+ * - FRB5 delivery: If some process broadcasts message m1 before it broadcasts message m2, then no correct process delivers m2 unless it has already delivered m1.
+ */
+
+ 
+UniformReliableBroadcast::UniformReliableBroadcast(uint8_t process_id, const std::vector<Parser::Host>& hosts, Logger& logger) : process_id_(process_id), hosts_(hosts), logger_(logger) {
     // Majority = floor(N/2) + 1
     majority_threshold_ = static_cast<uint32_t>(hosts_.size() / 2 + 1);
     // Initialize FIFO state: expect sequence 1 from every origin
