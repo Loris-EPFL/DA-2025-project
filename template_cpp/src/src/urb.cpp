@@ -156,7 +156,7 @@ void UniformReliableBroadcast::onPerfectLinksDeliver(uint32_t pl_sender_id, uint
         auto& ready_set = ready_to_deliver_[origin];
         
         // Deliver all consecutive ready messages starting from next_expected
-        // This ensures FIFO delivery order per origin
+        // ensures FIFO delivery order per origin
         while (ready_set.find(next_expected) != ready_set.end()) {
             MsgKey delivery_key{origin, next_expected};
             
@@ -228,6 +228,7 @@ void UniformReliableBroadcast::gcOnDelivery(uint32_t origin) {
         rebroadcasted_.erase(k); //actually delete
     }
 
+    //Debug
     std::cout << "GC: Cleaned up rebroadcasted_ and seen_forwarders_ for origin " << origin << std::endl;
 
 }
