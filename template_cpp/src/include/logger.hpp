@@ -6,6 +6,7 @@
 #include <memory>
 #include <functional>
 #include <mutex>
+#include <map>
 
 /**
  * Logger for event logging with crash-safe persistence (only allowed action after crash)
@@ -35,6 +36,19 @@ public:
      * @param sequence_number The sequence number of the delivered message
      */
     void logDelivery(uint32_t sender_id, uint32_t sequence_number);
+    
+    /**
+     * Log a lattice agreement decision (for Milestone 3)
+     * Decisions are stored by slot and output in slot order
+     * @param slot The slot number (1-indexed)
+     * @param decision The decision as a space-separated string of integers
+     */
+    void logLatticeDecision(uint32_t slot, const std::string& decision);
+    
+    /**
+     * Set the number of expected lattice slots (for ordered output)
+     */
+    void setLatticeMode(uint32_t num_slots);
     
     /**
      * Flush all buffered logs to disk (called from signal handler)
@@ -85,6 +99,16 @@ private:
     // Helper to format log entries
     std::string formatBroadcast(uint32_t sequence_number);
     std::string formatDelivery(uint32_t sender_id, uint32_t sequence_number);
+    
+    // Lattice agreement mode
+    bool lattice_mode_{false};
+    uint32_t lattice_num_slots_{0};
+    std::map<uint32_t, std::string> lattice_decisions_;  // slot -> decision string
+    std::mutex lattice_mutex_;
+    
+    // Helper to flush lattice decisions in order
+    void flushLatticeDecisions();
+    void flushLatticeDecisionsInternal();  // Internal version assuming lock held
 };
 
 /**
