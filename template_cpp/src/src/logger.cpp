@@ -266,15 +266,13 @@ std::string Logger::formatDelivery(uint32_t sender_id, uint32_t sequence_number)
     return oss.str();
 }
 
-// ============================================================================
 // Lattice Agreement Support (Milestone 3)
-// ============================================================================
 
 /**
  * Set lattice mode with expected number of slots
  */
 void Logger::setLatticeMode(uint32_t num_slots) {
-    std::lock_guard<std::mutex> lock(lattice_mutex_);
+    std::lock_guard<std::mutex> lock(lattice_mutex_); // Prevent race conditions for logs
     lattice_mode_ = true;
     lattice_num_slots_ = num_slots;
     lattice_decisions_.clear();
@@ -285,7 +283,7 @@ void Logger::setLatticeMode(uint32_t num_slots) {
  * Decisions are stored by slot and written in order on flush
  */
 void Logger::logLatticeDecision(uint32_t slot, const std::string& decision) {
-    std::lock_guard<std::mutex> lock(lattice_mutex_);
+    std::lock_guard<std::mutex> lock(lattice_mutex_); // Prevent race conditions for logs
     lattice_decisions_[slot] = decision;
     
     // Immediately flush - call internal version that assumes lock is held
@@ -297,7 +295,7 @@ void Logger::logLatticeDecision(uint32_t slot, const std::string& decision) {
  * Only writes consecutive decisions starting from slot 1
  */
 void Logger::flushLatticeDecisions() {
-    std::lock_guard<std::mutex> lock(lattice_mutex_);
+    std::lock_guard<std::mutex> lock(lattice_mutex_); // Prevent race conditions for logs
     flushLatticeDecisionsInternal();
 }
 
@@ -306,7 +304,7 @@ void Logger::flushLatticeDecisions() {
  */
 void Logger::flushLatticeDecisionsInternal() {
     // Assumes lattice_mutex_ is already locked by caller
-    std::lock_guard<std::mutex> flush_lock(flush_mutex_);
+    std::lock_guard<std::mutex> flush_lock(flush_mutex_); // Prevent race conditions for file I/O
     
     if (!lattice_mode_) return;
     

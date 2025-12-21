@@ -126,15 +126,12 @@ int main(int argc, char **argv) {
     }
     
     if (is_lattice_mode) {
-      // ================================================================
       // LATTICE AGREEMENT MODE (Milestone 3)
-      // ================================================================
       uint32_t num_proposals = static_cast<uint32_t>(first_int);
       uint32_t max_elements = static_cast<uint32_t>(second_int);
       uint32_t max_distinct = static_cast<uint32_t>(third_int);
       
-      std::cout << "Lattice Agreement mode: p=" << num_proposals 
-                << ", vs=" << max_elements << ", ds=" << max_distinct << std::endl;
+      std::cout << "Lattice Agreement mode: p=" << num_proposals << ", vs=" << max_elements << ", ds=" << max_distinct << std::endl;
       
       // Parse proposals (each line is a set of integers)
       std::vector<std::set<uint32_t>> proposals;
@@ -160,7 +157,7 @@ int main(int argc, char **argv) {
       // Set logger to lattice mode
       logger.setLatticeMode(num_proposals);
       
-      // Create Lattice Agreement instance
+      // Create Lattice Agreement
       LatticeAgreement lattice(static_cast<uint8_t>(parser.id()), hosts, logger, num_proposals);
       
       // Create delivery callback for PerfectLinks
@@ -188,7 +185,6 @@ int main(int argc, char **argv) {
         
         // Broadcast the proposal (need to call this explicitly after propose sets up state)
         // The propose function sets up state, we need to trigger the broadcast
-        // Actually, let me fix the propose function to also broadcast
       }
       
       // Wait for all slots to decide
@@ -206,9 +202,7 @@ int main(int argc, char **argv) {
       g_perfect_links.store(nullptr);
       
     } else {
-      // ================================================================
       // FIFO BROADCAST MODE (Milestone 2)
-      // ================================================================
       int num_messages = first_int;
       config_file.close();
       

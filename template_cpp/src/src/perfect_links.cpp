@@ -164,9 +164,7 @@ void PerfectLinks::send(uint8_t destination_id, const std::vector<uint8_t>& payl
     // Get next sequence number
     uint32_t seq_num = next_sequence_number_.fetch_add(1);
     
-    // TODO: Vector clock increment - not needed for now (Also can I use external libraries for that ?)
     // Will be re-enabled for future milestones if needed for causal ordering
-    // local_vector_clock_.increment(process_id_);
     PLMessage msg(static_cast<uint32_t>(process_id_), destination_id, seq_num, local_vector_clock_, MessageType::DATA, payload, true);
     
     // Store for retransmission
@@ -350,17 +348,7 @@ void PerfectLinks::handleDataMessage(const PLMessage& msg, const struct sockaddr
         // ignore messages from unknown senders
     }
     
-    // TODO: Vector clock update - not needed for now
-    // Will be re-enabled for future milestones if needed for causal ordering
-    // Update our local vector clock with the received message's clock
-    // This needs to be thread-safe as multiple threads might access it
-    // {
-    //     std::lock_guard<std::mutex> clock_lock(delivered_messages_mutex_);  // Reuse mutex for simplicity
-    //     local_vector_clock_.update(msg_clock);
-    // }
-    
-    // IMPORTANT: Mark as delivered *before* calling the callback. If we do it after,
-    // a race condition can occur where we receive the same message again and process it twice.
+    // IMPORTANT: Mark as delivered before calling the callback. If we do it after, a race condition can occur where we receive the same message again and process it twice.
     bool already_delivered = false;
     {
         std::lock_guard<std::mutex> lock(delivered_messages_mutex_);

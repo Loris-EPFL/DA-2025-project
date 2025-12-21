@@ -17,9 +17,8 @@ class Logger;
 /**
  * Multi-shot Lattice Agreement implementation
  * 
- * Each slot runs independent single-shot lattice agreement using the algorithm
- * from the project description. Uses BEB (via PerfectLinks broadcast) for proposals
- * and point-to-point for ACK/NACK responses.
+ * Each slot runs independent single-shot lattice agreement using the algorithm from the project pseudo code.
+ * Uses BEB (via PerfectLinks broadcast) for proposals and point-to-point for ACK/NACK responses.
  * 
  * Properties:
  * - LA1 Validity: Decision includes proposal and only proposed values
@@ -42,10 +41,7 @@ public:
      * @param logger Logger for output
      * @param num_slots Number of slots (proposals) to run
      */
-    LatticeAgreement(uint8_t process_id, 
-                     const std::vector<Parser::Host>& hosts,
-                     Logger& logger,
-                     uint32_t num_slots);
+    LatticeAgreement(uint8_t process_id, const std::vector<Parser::Host>& hosts, Logger& logger, uint32_t num_slots);
 
     /**
      * Set the PerfectLinks instance for communication
@@ -63,19 +59,7 @@ public:
      * Callback from PerfectLinks when a message is delivered
      * Routes to appropriate handler based on message type
      */
-    void onPerfectLinksDeliver(uint32_t sender_id, 
-                               uint32_t seq_num, 
-                               const std::vector<uint8_t>& payload);
-
-    /**
-     * Check if a specific slot has decided
-     */
-    bool hasDecided(uint32_t slot) const;
-
-    /**
-     * Get the decision for a slot (empty if not decided yet)
-     */
-    std::set<uint32_t> getDecision(uint32_t slot) const;
+    void onPerfectLinksDeliver(uint32_t sender_id, uint32_t seq_num, const std::vector<uint8_t>& payload);
 
     /**
      * Get total number of slots that have decided
@@ -93,33 +77,31 @@ private:
      * Each slot has both proposer and acceptor state
      */
     struct SlotState {
-        // === Proposer state ===
+        // Proposer state
         bool active{false};
         uint32_t ack_count{0};
         uint32_t nack_count{0};
         uint32_t active_proposal_number{0};
         std::set<uint32_t> proposed_value;
         
-        // === Acceptor state ===
+        // Acceptor state
         std::set<uint32_t> accepted_value;
         
-        // Track which proposal numbers we've already responded to from each proposer
-        // to avoid duplicate responses
+        // Track which proposal numbers we've already responded to from each proposer to avoid duplicate responses
         std::unordered_map<uint32_t, uint32_t> last_responded_proposal;
         
-        // === Decision state ===
+        // Decision state
         bool decided{false};
         std::set<uint32_t> decision;
     };
 
-    // === Message encoding/decoding ===
+    // Message encoding/decoding
     
     /**
      * Encode a PROPOSAL message
      * Format: [TYPE][SLOT][PROPOSER_ID][PROPOSAL_NUM][COUNT][VAL1][VAL2]...
      */
-    std::vector<uint8_t> encodeProposal(uint32_t slot, uint32_t proposal_number, 
-                                         const std::set<uint32_t>& value);
+    std::vector<uint8_t> encodeProposal(uint32_t slot, uint32_t proposal_number, const std::set<uint32_t>& value);
     
     /**
      * Encode an ACK message
@@ -131,27 +113,20 @@ private:
      * Encode a NACK message
      * Format: [TYPE][SLOT][PROPOSAL_NUM][COUNT][VAL1][VAL2]...
      */
-    std::vector<uint8_t> encodeNack(uint32_t slot, uint32_t proposal_number, 
-                                     const std::set<uint32_t>& value);
+    std::vector<uint8_t> encodeNack(uint32_t slot, uint32_t proposal_number, const std::set<uint32_t>& value);
     
     /**
      * Decode any lattice agreement message
      * @return true if decoding successful
      */
-    bool decodeMessage(const std::vector<uint8_t>& payload,
-                       MessageType& type_out,
-                       uint32_t& slot_out,
-                       uint32_t& proposer_id_out,
-                       uint32_t& proposal_number_out,
-                       std::set<uint32_t>& value_out);
+    bool decodeMessage(const std::vector<uint8_t>& payload, MessageType& type_out, uint32_t& slot_out, uint32_t& proposer_id_out, uint32_t& proposal_number_out, std::set<uint32_t>& value_out);
 
-    // === Protocol handlers ===
+    // Protocol handlers 
     
     /**
      * Handle incoming PROPOSAL message (acceptor role)
      */
-    void handleProposal(uint32_t sender_id, uint32_t slot, 
-                        uint32_t proposal_number, const std::set<uint32_t>& value);
+    void handleProposal(uint32_t sender_id, uint32_t slot, uint32_t proposal_number, const std::set<uint32_t>& value);
     
     /**
      * Handle incoming ACK message (proposer role)
@@ -161,13 +136,8 @@ private:
     /**
      * Handle incoming NACK message (proposer role)
      */
-    void handleNack(uint32_t slot, uint32_t proposal_number, 
-                    const std::set<uint32_t>& value);
+    void handleNack(uint32_t slot, uint32_t proposal_number, const std::set<uint32_t>& value);
 
-    /**
-     * Broadcast a proposal for a slot using BEB (via PerfectLinks)
-     */
-    void broadcastProposal(uint32_t slot);
 
     /**
      * Check progress and trigger decision or re-proposal if conditions are met
