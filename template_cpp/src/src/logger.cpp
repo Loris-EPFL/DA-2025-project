@@ -209,11 +209,6 @@ void Logger::periodicFlush(bool force_flush) {
         // Update last flushed count atomically
         last_flushed_count_.store(current_count);
         
-        //Debug info 
-        // if (entries_written > 0) {
-        //     std::cout << "Periodic flush: wrote " << entries_written << " new entries to " << output_path_ << std::endl;
-        // }
-        
     } catch (const std::exception& e) {
         std::cerr << "Error during periodic logging: " << e.what() << std::endl;
     } catch (...) {

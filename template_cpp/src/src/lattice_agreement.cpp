@@ -16,10 +16,10 @@
 /**
  * Constructor:
  * 
- * This sets up the multi-shot lattice agreement for a given process.
- * We calculate the fault tolerance parameters based on the number of processes:
- * - With n = 2f + 1 processes, we can tolerate up to f crashes
- * - A quorum of f + 1 responses is needed to make progress (majority)
+ * sets up the multi-shot lattice agreement for a given process.
+ * calculate the fault tolerance parameters based on the number of processes:
+ * - With n = 2f + 1 processes, tolerate up to f crashes
+ * - A quorum of f + 1 responses is needed to have majority
  * 
  * Each slot runs an independent instance of single-shot lattice agreement, allowing processes to agree on multiple values in sequence.
  * 
@@ -48,17 +48,15 @@ LatticeAgreement::LatticeAgreement(uint8_t process_id,  const std::vector<Parser
  * - Best-Effort Broadcast (BEB) for proposals (by sending to all processes)
  * - Point-to-point communication for ACK/NACK responses
  * 
- * This must be called before any proposals are made.
- * 
  * @param pl Pointer to the initialized Perfect Links instance
  */
 void LatticeAgreement::setPerfectLinks(PerfectLinks* pl) {
     pl_ = pl;
 }
 
-// ============================================================================
+
 // Message Encoding/Decoding
-// ============================================================================
+
 
 /**
  * Encode a PROPOSAL message for broadcast
@@ -94,21 +92,21 @@ std::vector<uint8_t> LatticeAgreement::encodeProposal(uint32_t slot,  uint32_t p
     
     // Which slot this proposal is for (multi-shot support)
     std::memcpy(buf.data() + offset, &slot, sizeof(uint32_t)); // Copy slot number
-    offset += sizeof(uint32_t); // Move past slot field (4 bytes)
+    offset += sizeof(uint32_t); // Move past slot field 
     
     // Who is making this proposal (needed for sending responses back)
     uint32_t proposer_id = static_cast<uint32_t>(process_id_);
     std::memcpy(buf.data() + offset, &proposer_id, sizeof(uint32_t)); // Copy proposer ID number
-    offset += sizeof(uint32_t); // Move past proposer ID field (4 bytes)
+    offset += sizeof(uint32_t); // Move past proposer ID field 
     
     // Proposal number (increases on re-proposals to distinguish attempts)
     std::memcpy(buf.data() + offset, &proposal_number, sizeof(uint32_t)); // Copy proposal number
-    offset += sizeof(uint32_t); // Move past proposal number field (4 bytes);
+    offset += sizeof(uint32_t); // Move past proposal number field ;
     
     // Number of values in the proposed set
     uint32_t count = static_cast<uint32_t>(value.size());
     std::memcpy(buf.data() + offset, &count, sizeof(uint32_t)); // Copy count of values
-    offset += sizeof(uint32_t); // Move past count field (4 bytes)
+    offset += sizeof(uint32_t); // Move past count field 
     
     // The actual values (std::set maintains sorted order)
     //TODO: check if it can overflow from perfect links when too many values
@@ -161,10 +159,10 @@ std::vector<uint8_t> LatticeAgreement::encodeAck(uint32_t slot, uint32_t proposa
  * Encode a NACK message for point-to-point response
  * 
  * A NACK is sent back to the proposer when an acceptor cannot accept a proposal (Algorithm 2, line 8).
- * This happens when the acceptor has previously accepted values that are NOT a subset of the proposed value.
+ * happens when the acceptor has previously accepted values that are NOT a subset of the proposed value.
  * 
  * The NACK includes the acceptor's merged accepted value (union of proposed and previously accepted).
- * This helps the proposer converge faster by learning what other values need to be included in the next proposal.
+ * helps the proposer converge faster by learning what other values need to be included in the next proposal.
  * 
  * Message format: [TYPE=2][SLOT][PROPOSAL_NUM][COUNT][VAL1][VAL2]...
  * - TYPE: 1 byte identifying this as a NACK
@@ -222,7 +220,7 @@ std::vector<uint8_t> LatticeAgreement::encodeNack(uint32_t slot, uint32_t propos
  * - The payload has enough bytes for all expected fields
  * 
  * If decoding fails (invalid format or unknown type), we return false and the message is ignored.
- * This is safe because lattice agreement can tolerate lost messages and the proposer will eventually re-propose if needed.
+ * safe because lattice agreement can tolerate lost messages and the proposer will eventually re-propose if needed.
  * 
  * @param payload Raw bytes received from Perfect Links
  * @param type_out Output: The message type (PROPOSAL, ACK, or NACK)
@@ -332,22 +330,21 @@ bool LatticeAgreement::decodeMessage(const std::vector<uint8_t>& payload, Messag
         }
         
         default:
-            // Unknown message type - ignore it
+            // Unknown message type. ignore it
             return false;
     }
-    // Unknown message type - ignore it
+    // Unknown message type. ignore it
     return false;
 }
 
-// ============================================================================
+
 // Public Interface
-// ============================================================================
+
 
 /**
  * Propose a value for a specific slot (Algorithm 1, lines 7-13)
  * 
- * This is the main entry point for starting a lattice agreement instance.
- * When called, we:
+ * the main entry point for starting a lattice agreement instance.
  * 1. Initialize the proposer state for this slot
  * 2. Set the proposal as our proposed value
  * 3. Mark ourselves as active (we're trying to get this value decided)
@@ -395,13 +392,13 @@ void LatticeAgreement::propose(uint32_t slot, const std::set<uint32_t>& proposal
 /**
  * Callback invoked when Perfect Links delivers a message
  * 
- * This is the main message handler for lattice agreement. 
- * Perfect Links calls this function whenever it delivers a message to us. We need to:
+ * main message handler for lattice agreement. 
+ * Perfect Links calls this function whenever it delivers a message to us.
  * 1. Decode the message to determine its type and extract fields
  * 2. Route it to the appropriate handler based on message type
  * 
  * We ignore messages that fail to decode because they might be from other protocols or corrupted.
- * This is safe because lattice agreement can tolerate message loss and correct message will eventually be delivered.
+ * safe because lattice agreement can tolerate message loss and correct message will eventually be delivered.
  * 
  * The sender_id from Perfect Links tells us who sent the message, but for PROPOSAL messages we also have the proposer_id embedded in the message itself (they should match).
  * For ACK/NACK, we use sender_id to know who responded.
@@ -417,7 +414,7 @@ void LatticeAgreement::onPerfectLinksDeliver(uint32_t sender_id, uint32_t seq_nu
     uint32_t slot, proposer_id, proposal_number;
     std::set<uint32_t> value;
     
-    // Try to decode the message - if it fails, it's not for us
+    // Try to decode the message. if it fails, it's not for us
     if (!decodeMessage(payload, type, slot, proposer_id, proposal_number, value)) {
         // Not a valid lattice agreement message, ignore it
         // This could be a message from another protocol or corrupted data
@@ -456,9 +453,9 @@ uint32_t LatticeAgreement::getDecidedCount() const {
     return decided_count_.load();
 }
 
-// ============================================================================
+
 // Protocol Handlers
-// ============================================================================
+
 
 /**
  * Handle a PROPOSAL message (Algorithm 2: Acceptor logic)
@@ -466,13 +463,13 @@ uint32_t LatticeAgreement::getDecidedCount() const {
  * When we receive a proposal, we act as an acceptor and decide whether to accept it or reject it based on what we've previously accepted.
  * 
  * The key insight of lattice agreement is the subset check:
- * - If our accepted_value ⊆ proposed_value: We can accept (send ACK), this means the proposal includes everything we've accepted so far
+ * - If our accepted_value is included in proposed_value: We can accept (send ACK), this means the proposal includes everything we've accepted so far
  * - Otherwise: We must reject (send NACK with merged value), this means we've accepted something the proposer doesn't know about
  * 
  * When we NACK, we merge our accepted value with the proposal and send it back.
  * This helps the proposer converge faster by learning what needs to be included.
  * 
- * We use std::includes to check the subset relationship - it works because std::set maintains sorted order, which is required by std::includes.
+ * We use std::includes to check the subset relationship  because std::set maintains sorted order.
  * 
  * The response is prepared inside the lock but sent outside to avoid holding the lock during network operations.
  * 
@@ -520,8 +517,8 @@ void LatticeAgreement::handleProposal(uint32_t sender_id, uint32_t slot, uint32_
  * When we receive an ACK, it means an acceptor has accepted our proposal.
  * We increment the ACK counter and check if we have enough ACKs to decide.
  * 
- * Important: We only count ACKs for our CURRENT active proposal number.
- * If we receive an ACK for an old proposal (because we already re-proposed), we ignore it. This prevents counting stale responses.
+ * We only count ACKs for our CURRENT active proposal number.
+ * If we receive an ACK for an old proposal (because we already re-proposed), we ignore it, preventing counting stale responses.
  * 
  * After incrementing the counter, we call checkProgress to see if:
  * - We have f+1 ACKs with no NACKs -> decide
@@ -556,8 +553,7 @@ void LatticeAgreement::handleAck(uint32_t slot, uint32_t proposal_number) {
  * 2. Increment the NACK counter
  * 3. Check if we have enough responses to re-propose
  * 
- * Important: We only count NACKs for our CURRENT active proposal number.
- * Stale NACKs from old proposals are ignored.
+ * We only count NACKs for our CURRENT active proposal number,and stale NACKs from old proposals are ignored.
  * 
  * The merge operation ensures our next proposal will include all values that any acceptor has seen, helping us converge toward a decision.
  * 
@@ -586,25 +582,25 @@ void LatticeAgreement::handleNack(uint32_t slot, uint32_t proposal_number, const
 /**
  * Check if we can make progress (decide or re-propose)
  * 
- * This function implements the core decision logic of the lattice agreement algorithm.
- * It's called after receiving each ACK or NACK to check if we've reached one of two conditions:
+ * core decision logic of the lattice agreement algorithm.
+ * called after receiving each ACK or NACK to check if we've reached conditions:
  * 
  * 1. DECISION CONDITION (Algorithm 1, lines 24-26):
  *    - We have f+1 ACKs AND no NACKs
- *    - This means a quorum accepted our proposal without conflicts
- *    - We can safely decide on our proposed value
+ *    - means a quorum accepted our proposal without conflicts
+ *    - safely decide on our proposed value
  * 
  * 2. RE-PROPOSAL CONDITION (Algorithm 1, lines 19-23):
  *    - We have at least one NACK
  *    - We have f+1 total responses (ACKs + NACKs)
- *    - This means a quorum responded, but there were conflicts
- *    - We must re-propose with the merged value
+ *    - means a quorum responded, but there were conflicts
+ *    - re-propose with the merged value
  * 
  * The re-proposal increments the proposal number and resets counters.
- * We broadcast the new proposal with the merged value, which now includes all values that any acceptor has seen.
+ * broadcast the new proposal with the merged value, which now includes all values that any acceptor has seen.
  * 
  * Note: This function is called with state_mutex_ already held by the caller.
- * We broadcast while holding the lock, which is safe because Perfect Links handles its own locking and won't deadlock.
+ * We broadcast while holding the lock, which is safe because Perfect Links handles its own locking.
  * 
  * @param slot The slot number to check progress for
  */
@@ -656,17 +652,11 @@ void LatticeAgreement::checkProgress(uint32_t slot) {
 /**
  * Log a decision to the output file
  * 
- * When a decision is made, we need to record it in the output file:
+ * When a decision is made, we record it in the output file:
  * - Space-separated integers
  * - Sorted in ascending order (std::set guarantees this)
  * - One line per decision
  * - Decisions must appear in slot order (1, 2, 3, ...)
- * 
- * We format the decision as a string and pass it to the logger, which handles:
- * - Storing decisions by slot number
- * - Writing them to file in the correct order
- * - Ensuring crash-safe persistence (decisions survive SIGTERM/SIGINT)
- * 
  * 
  * @param slot The slot number for this decision
  * @param decision The decided set of values (already sorted by std::set)
