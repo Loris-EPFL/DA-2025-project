@@ -2,7 +2,6 @@
 
 #include <cstdint>
 #include <vector>
-#include <array>
 #include <algorithm>
 #include <cstring>
 

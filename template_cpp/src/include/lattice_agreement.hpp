@@ -78,21 +78,21 @@ private:
      */
     struct SlotState {
         // Proposer state
-        bool active{false};
-        uint32_t ack_count{0};
-        uint32_t nack_count{0};
-        uint32_t active_proposal_number{0};
-        std::set<uint32_t> proposed_value;
+        bool active{false}; //Init to false 
+        uint32_t ack_count{0}; //Init to 0
+        uint32_t nack_count{0}; //Init to 0
+        uint32_t active_proposal_number{0}; //Init to 0
+        std::set<uint32_t> proposed_value; //Init to empty set
         
         // Acceptor state
-        std::set<uint32_t> accepted_value;
+        std::set<uint32_t> accepted_value; //Init to empty set
         
         // Track which proposal numbers we've already responded to from each proposer to avoid duplicate responses
-        std::unordered_map<uint32_t, uint32_t> last_responded_proposal;
+        std::unordered_map<uint32_t, uint32_t> last_responded_proposal; //Init to empty map
         
         // Decision state
-        bool decided{false};
-        std::set<uint32_t> decision;
+        bool decided{false}; //Init to false
+        std::set<uint32_t> decision; //Init to empty set
     };
 
     // Message encoding/decoding

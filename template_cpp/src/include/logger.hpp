@@ -3,7 +3,6 @@
 #include <vector>
 #include <string>
 #include <atomic>
-#include <memory>
 #include <functional>
 #include <mutex>
 #include <map>

@@ -2,7 +2,6 @@
 #include "perfect_links.hpp"
 #include "logger.hpp"
 #include <cstring>
-#include <algorithm>
 #include <iostream>
 #include <sstream>
 

@@ -21,7 +21,7 @@ struct BatchHeader {
     uint32_t total_size;
     uint32_t reserved;
     
-    static constexpr uint32_t BATCH_HEADER_SIGNATURE = 0x424D5347;  // "BMSG" in ASCII
+    static constexpr uint32_t BATCH_HEADER_SIGNATURE = 0x424D5347;  // "BMSG" in ASCII, used to identify the batch header
     static constexpr uint8_t MAX_MESSAGES_PER_BATCH = 8; //Max number of messages per packet, here 8 according to the TAs
     
     BatchHeader() : magic_number(BATCH_HEADER_SIGNATURE), message_count(0), total_size(0), reserved(0) {}
@@ -29,9 +29,7 @@ struct BatchHeader {
     BatchHeader(uint32_t count, uint32_t size) : magic_number(BATCH_HEADER_SIGNATURE), message_count(count), total_size(size), reserved(0) {}
     
     bool isValid() const {
-        return magic_number == BATCH_HEADER_SIGNATURE &&
-               message_count > 0 && 
-               message_count <= MAX_MESSAGES_PER_BATCH;
+        return magic_number == BATCH_HEADER_SIGNATURE && message_count > 0 && message_count <= MAX_MESSAGES_PER_BATCH; //Check if the batch is valid
     }
 };
 
