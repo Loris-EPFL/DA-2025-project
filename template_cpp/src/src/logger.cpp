@@ -89,6 +89,38 @@ void Logger::flushOnCrash() {
     if (!flushed_.compare_exchange_strong(expected, true)) {
         return;
     }
+    
+    // Check if we're in lattice mode
+    if (lattice_mode_) {
+        // Flush lattice decisions
+        try {
+            std::ofstream output_file(output_path_, std::ios::trunc);
+            if (!output_file.is_open()) {
+                std::cerr << "Failed to open output file for lattice crash logging: " << output_path_ << std::endl;
+                return;
+            }
+            
+            // Write decisions in slot order (1, 2, 3, ...)
+            for (uint32_t slot = 1; slot <= lattice_num_slots_; slot++) {
+                auto it = lattice_decisions_.find(slot);
+                if (it != lattice_decisions_.end()) {
+                    output_file << it->second << '\n';
+                } else {
+                    // Stop at first missing slot
+                    break;
+                }
+            }
+            
+            output_file.flush();
+            output_file.close();
+            std::cout << "Crash flush: wrote lattice decisions to " << output_path_ << std::endl;
+            
+        } catch (const std::exception& e) {
+            std::cerr << "Error during lattice crash logging: " << e.what() << std::endl;
+        }
+        return;
+    }
+    
     // Do not take mutexes inside a signal handler; write directly
     try {
         size_t last_flushed = last_flushed_count_.load();
@@ -177,11 +209,6 @@ void Logger::periodicFlush(bool force_flush) {
         // Update last flushed count atomically
         last_flushed_count_.store(current_count);
         
-        //Debug info 
-        // if (entries_written > 0) {
-        //     std::cout << "Periodic flush: wrote " << entries_written << " new entries to " << output_path_ << std::endl;
-        // }
-        
     } catch (const std::exception& e) {
         std::cerr << "Error during periodic logging: " << e.what() << std::endl;
     } catch (...) {
@@ -232,4 +259,73 @@ std::string Logger::formatDelivery(uint32_t sender_id, uint32_t sequence_number)
     std::ostringstream oss;
     oss << "d " << sender_id << " " << sequence_number;
     return oss.str();
+}
+
+// Lattice Agreement Support (Milestone 3)
+
+/**
+ * Set lattice mode with expected number of slots
+ */
+void Logger::setLatticeMode(uint32_t num_slots) {
+    std::lock_guard<std::mutex> lock(lattice_mutex_); // Prevent race conditions for logs
+    lattice_mode_ = true;
+    lattice_num_slots_ = num_slots;
+    lattice_decisions_.clear();
+}
+
+/**
+ * Log a lattice agreement decision
+ * Decisions are stored by slot and written in order on flush
+ */
+void Logger::logLatticeDecision(uint32_t slot, const std::string& decision) {
+    std::lock_guard<std::mutex> lock(lattice_mutex_); // Prevent race conditions for logs
+    lattice_decisions_[slot] = decision;
+    
+    // Immediately flush - call internal version that assumes lock is held
+    flushLatticeDecisionsInternal();
+}
+
+/**
+ * Flush lattice decisions to disk in slot order
+ * Only writes consecutive decisions starting from slot 1
+ */
+void Logger::flushLatticeDecisions() {
+    std::lock_guard<std::mutex> lock(lattice_mutex_); // Prevent race conditions for logs
+    flushLatticeDecisionsInternal();
+}
+
+/**
+ * Internal flush - assumes lattice_mutex_ is already held
+ */
+void Logger::flushLatticeDecisionsInternal() {
+    // Assumes lattice_mutex_ is already locked by caller
+    std::lock_guard<std::mutex> flush_lock(flush_mutex_); // Prevent race conditions for file I/O
+    
+    if (!lattice_mode_) return;
+    
+    try {
+        // Open file and write all decisions in order
+        std::ofstream output_file(output_path_, std::ios::trunc);
+        if (!output_file.is_open()) {
+            std::cerr << "Failed to open output file for lattice decisions: " << output_path_ << std::endl;
+            return;
+        }
+        
+        // Write decisions in slot order (1, 2, 3, ...)
+        for (uint32_t slot = 1; slot <= lattice_num_slots_; slot++) {
+            auto it = lattice_decisions_.find(slot);
+            if (it != lattice_decisions_.end()) {
+                output_file << it->second << '\n';
+            } else {
+                // Stop at first missing slot - can't write out of order
+                break;
+            }
+        }
+        
+        output_file.flush();
+        output_file.close();
+        
+    } catch (const std::exception& e) {
+        std::cerr << "Error flushing lattice decisions: " << e.what() << std::endl;
+    }
 }

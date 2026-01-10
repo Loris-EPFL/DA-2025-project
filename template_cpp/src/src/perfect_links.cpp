@@ -10,7 +10,7 @@
 #include <errno.h>
 
 // Constructor
-PerfectLinks::PerfectLinks(Parser::Host localhost,std::function<void(uint32_t, uint32_t, const std::vector<uint8_t>&)> deliveryCallback, const std::vector<Parser::Host>& hosts, const std::string& output_path): process_id_(static_cast<uint8_t>(localhost.id)), localhost_(localhost), id_to_peer_(), delivery_callback_(std::move(deliveryCallback)), output_path_(output_path), socket_fd_(-1), local_vector_clock_(), running_(false), next_sequence_number_(1)
+PerfectLinks::PerfectLinks(Parser::Host localhost,std::function<void(uint32_t, uint32_t, const std::vector<uint8_t>&)> deliveryCallback, const std::vector<Parser::Host>& hosts, const std::string& output_path): process_id_(static_cast<uint8_t>(localhost.id)), localhost_(localhost), id_to_peer_(), delivery_callback_(std::move(deliveryCallback)), output_path_(output_path), socket_fd_(-1), running_(false), next_sequence_number_(1)
 {  
     // Create ID to peer map from hosts vector
     for (const auto& host : hosts) {
@@ -164,10 +164,8 @@ void PerfectLinks::send(uint8_t destination_id, const std::vector<uint8_t>& payl
     // Get next sequence number
     uint32_t seq_num = next_sequence_number_.fetch_add(1);
     
-    // TODO: Vector clock increment - not needed for now (Also can I use external libraries for that ?)
     // Will be re-enabled for future milestones if needed for causal ordering
-    // local_vector_clock_.increment(process_id_);
-    PLMessage msg(static_cast<uint32_t>(process_id_), destination_id, seq_num, local_vector_clock_, MessageType::DATA, payload, true);
+    PLMessage msg(static_cast<uint32_t>(process_id_), destination_id, seq_num, MessageType::DATA, payload, true);
     
     // Store for retransmission
     {
@@ -343,24 +341,13 @@ void PerfectLinks::handleMessage(const PLMessage& msg, const struct sockaddr_in&
 void PerfectLinks::handleDataMessage(const PLMessage& msg, const struct sockaddr_in& sender_addr) {
     uint8_t sender_id = static_cast<uint8_t>(msg.sender_id);
     uint32_t seq_num = msg.sequence_number;
-    const VectorClock& msg_clock = msg.vector_clock;
     
     // Only process messages from known senders (defined in hosts configuration)
     if (id_to_peer_.find(sender_id) == id_to_peer_.end()) {
         // ignore messages from unknown senders
     }
     
-    // TODO: Vector clock update - not needed for now
-    // Will be re-enabled for future milestones if needed for causal ordering
-    // Update our local vector clock with the received message's clock
-    // This needs to be thread-safe as multiple threads might access it
-    // {
-    //     std::lock_guard<std::mutex> clock_lock(delivered_messages_mutex_);  // Reuse mutex for simplicity
-    //     local_vector_clock_.update(msg_clock);
-    // }
-    
-    // IMPORTANT: Mark as delivered *before* calling the callback. If we do it after,
-    // a race condition can occur where we receive the same message again and process it twice.
+    // IMPORTANT: Mark as delivered before calling the callback. If we do it after, a race condition can occur where we receive the same message again and process it twice.
     bool already_delivered = false;
     {
         std::lock_guard<std::mutex> lock(delivered_messages_mutex_);
@@ -373,7 +360,7 @@ void PerfectLinks::handleDataMessage(const PLMessage& msg, const struct sockaddr
     }
     
     // send ACK (whether duplicate or new message), doesn't violate PL2 since its only the acks
-    PLMessage ack_msg(static_cast<uint32_t>(process_id_), sender_id, seq_num, msg_clock, MessageType::ACK, false);
+    PLMessage ack_msg(static_cast<uint32_t>(process_id_), sender_id, seq_num, MessageType::ACK, false);
     sendBatchedMessage(ack_msg, sender_id);
     
     //  deliver if this is a new message not already delivered

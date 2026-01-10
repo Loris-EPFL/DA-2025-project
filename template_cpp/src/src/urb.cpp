@@ -3,7 +3,6 @@
 #include "logger.hpp"
 #include <cstring>
 #include <mutex>
-#include <fstream>
 
 
 /**
@@ -229,7 +228,7 @@ void UniformReliableBroadcast::gcOnDelivery(uint32_t origin) {
     }
 
     //Debug
-    std::cout << "GC: Cleaned up rebroadcasted_ and seen_forwarders_ for origin " << origin << std::endl;
+    // std::cout << "GC: Cleaned up rebroadcasted_ and seen_forwarders_ for origin " << origin << std::endl;
 
 }
 

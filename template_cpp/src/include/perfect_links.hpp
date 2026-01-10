@@ -8,7 +8,6 @@
 #include <thread>
 #include <mutex>
 #include <atomic>
-#include <fstream>
 #include <functional>
 #include <map>
 #include <unordered_set>
@@ -86,7 +85,6 @@ private:
     std::function<void(uint32_t, uint32_t, const std::vector<uint8_t>&)> delivery_callback_;
     std::string output_path_;
     int socket_fd_;
-    VectorClock local_vector_clock_; //Not used for now
     std::atomic<bool> running_;
     std::atomic<uint32_t> next_sequence_number_;
     
